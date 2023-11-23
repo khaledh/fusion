@@ -1,7 +1,7 @@
 type
-  EfiHandle = uint
   EfiStatus = uint
-  EFiSystemTable = object
+  EfiHandle = pointer
+  EFiSystemTable = object # to be defined later
 
 proc efiMain(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus {.exportc.} =
-  return 42
+  return 0
