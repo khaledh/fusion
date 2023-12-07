@@ -3,9 +3,9 @@
 import uefi
 
 type
-  constPointer {.importc: "const void *".} = pointer
+  const_pointer {.importc: "const void *".} = pointer
 
-proc fwrite*(buf: constPointer, size: csize_t, count: csize_t, stream: File): csize_t {.exportc.} =
+proc fwrite*(buf: const_pointer, size: csize_t, count: csize_t, stream: File): csize_t {.exportc.} =
   let msg = newWideCString(cast[cstring](buf), size.int * count.int).toWideCString
   discard conOut.outputString(conOut, addr msg[0])
   return count

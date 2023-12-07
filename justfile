@@ -1,5 +1,10 @@
+[linux]
 compile:
   nim c --os:any src/bootx64.nim
+
+[macos]
+compile:
+  nim c --os:any -d:macosx src/bootx64.nim
 
 run: compile
   qemu-system-x86_64 \
