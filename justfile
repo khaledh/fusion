@@ -7,4 +7,5 @@ run: compile
     -drive if=pflash,format=raw,file=ovmf/OVMF_VARS.fd \
     -drive format=raw,file=fat:rw:diskimg \
     -machine q35 \
-    -net none -nographic
+    -net none \
+    -nographic
