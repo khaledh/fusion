@@ -1,11 +1,10 @@
-import debug
-import libc
-import malloc
+import debugcon
+import common/libc
+import common/malloc
 
 proc halt() {.inline, asmNoStackFrame.} =
   asm """
   .loop:
-    mov rax, 0x5050505050505050
     cli
     hlt
     jmp .loop

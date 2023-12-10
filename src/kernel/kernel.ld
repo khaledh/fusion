@@ -1,6 +1,9 @@
+_KERNEL_BASE = 0x100000;
+
 SECTIONS {
-    . = 0x100000;
+    . = _KERNEL_BASE;
     .text : {
+        *kernel*(.text)
         *(.text)
     }
     .data : {

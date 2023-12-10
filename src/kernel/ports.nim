@@ -1,7 +1,3 @@
-#[
-  Port I/O
-]#
-
 proc portOut8*(port: uint16, data: uint8) =
   asm """
     out %0, %1

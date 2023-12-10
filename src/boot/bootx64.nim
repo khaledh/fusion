@@ -1,9 +1,8 @@
 import std/strformat
 
-import debug
-import libc
-import malloc
-import uefi
+import common/libc
+import common/malloc
+import common/uefi
 
 proc NimMain() {.importc.}
 
@@ -181,8 +180,6 @@ proc EfiMain(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus {.ex
   NimMain()
   uefi.sysTable = sysTable
   consoleClear()
-
-  debugln "boot: EfiMain called"
 
   try:
     return EfiMainInner(imgHandle, sysTable)
