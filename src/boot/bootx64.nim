@@ -21,11 +21,27 @@ type
   ) {.cdecl.}
 
 
-proc checkStatus*(status: EfiStatus) =
-  if status != EfiSuccess:
-    consoleOutError &" [failed, status = {status:#x}]"
-    quit()
-  consoleOutSuccess " [success]\r\n"
+# forward declarations
+proc NimMain() {.importc.}
+proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
+proc getStackRegion(
+  memoryMap: ptr UncheckedArray[EfiMemoryDescriptor],
+  memoryMapSize: uint64,
+  memoryMapDescriptorSize: uint64
+): tuple[stackBase: uint64, stackPages: uint64]
+proc checkStatus*(status: EfiStatus)
+proc unhandledException*(e: ref Exception)
+
+
+proc EfiMain(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus {.exportc.} =
+  NimMain()
+  uefi.sysTable = sysTable
+  consoleClear()
+
+  try:
+    return EfiMainInner(imgHandle, sysTable)
+  except Exception as e:
+    unhandledException(e)
 
 proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus =
   consoleOutColor "Fusion OS Bootloader", fgYellow
@@ -159,27 +175,8 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
 
   # ======= NO MORE UEFI BOOT SERVICES =======
 
-  debugln "boot: Exited boot services"
-
-  # get stack pointer
-  var rsp: uint64
-  asm """
-    mov %0, rsp
-    :"=r"(`rsp`)
-  """
-
-  # scan memory map until we find the stack region
-  var stackBase: uint64
-  var stackPages: uint64
-  let numMemoryMapEntries = memoryMapSize div memoryMapDescriptorSize
-  for i in 0 ..< numMemoryMapEntries:
-    let entry = cast[ptr EfiMemoryDescriptor](cast[uint64](memoryMap) + i * memoryMapDescriptorSize)
-    if rsp > entry.physicalStart and rsp < entry.physicalStart + entry.numberOfPages * 0x1000:
-      stackBase = entry.physicalStart
-      stackPages = entry.numberOfPages
-      break
-
-  debugln "boot: Creating kernel page table"
+  debugln ""
+  debugln "boot: Creating page table"
   # initialize a throw-away page table to map the kernel
   var pml4 = new PML4Table
 
@@ -187,23 +184,24 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
   let bootloaderBase = cast[uint64](loadedImage.imageBase)
   let bootloaderPages = (loadedImage.imageSize.uint + 0xFFF) div 0x1000.uint
   debugln &"boot: Identity-mapping bootloader image: base={bootloaderBase:#x}, pages={bootloaderPages}"
-  mapPages(pml4, bootloaderBase, bootloaderBase, bootloaderPages.uint64, paReadWrite, pmSupervisor)
+  identityMapPages(pml4, bootloaderBase, bootloaderPages.uint64, paReadWrite, pmSupervisor)
 
   # identity-map bootloader stack
+  let (stackBase, stackPages) = getStackRegion(memoryMap, memoryMapSize, memoryMapDescriptorSize)
   debugln &"boot: Identity-mapping stack: base={stackBase:#x}, pages={stackPages}"
-  mapPages(pml4, stackBase, stackBase, stackPages, paReadWrite, pmSupervisor)
+  identityMapPages(pml4, stackBase, stackPages, paReadWrite, pmSupervisor)
 
   # identity-map memory map
   let memoryMapPages = (memoryMapSize + 0xFFF) div 0x1000.uint
   debugln &"boot: Identity-mapping memory map: base={cast[uint64](memoryMap):#x}, pages={memoryMapPages}"
-  mapPages(pml4, cast[uint64](memoryMap), cast[uint64](memoryMap), memoryMapPages, paReadWrite, pmSupervisor)
+  identityMapPages(pml4, cast[uint64](memoryMap), memoryMapPages, paReadWrite, pmSupervisor)
 
   # identity-map kernel
   debugln &"boot: Identity-mapping kernel: base={KernelPhysicalBase:#x}, pages={kernelPages}"
-  mapPages(pml4, KernelPhysicalBase, KernelPhysicalBase, kernelPages, paReadWrite, pmSupervisor)
+  identityMapPages(pml4, KernelPhysicalBase, kernelPages, paReadWrite, pmSupervisor)
 
-  # map kernel to upper half
-  debugln &"boot: Mapping kernel to upper half: base={KernelVirtualBase}, pages={kernelPages}"
+  # map kernel to higher half
+  debugln &"boot: Mapping kernel to higher half: base={KernelVirtualBase:#x}, pages={kernelPages}"
   mapPages(pml4, KernelVirtualBase, KernelPhysicalBase, kernelPages, paReadWrite, pmSupervisor)
 
   debugln "boot: Installing page table"
@@ -217,6 +215,36 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
   # we should never get here
   quit()
 
+proc getStackRegion(
+  memoryMap: ptr UncheckedArray[EfiMemoryDescriptor],
+  memoryMapSize: uint64,
+  memoryMapDescriptorSize: uint64
+): tuple[stackBase: uint64, stackPages: uint64] =
+  # get stack pointer
+  var rsp: uint64
+  asm """
+    mov %0, rsp
+    :"=r"(`rsp`)
+  """
+
+  # scan memory map until we find the stack region
+  var stackBase: uint64
+  var stackPages: uint64
+  let numMemoryMapEntries = memoryMapSize div memoryMapDescriptorSize
+  for i in 0 ..< numMemoryMapEntries:
+    let entry = cast[ptr EfiMemoryDescriptor](cast[uint64](memoryMap) + i * memoryMapDescriptorSize)
+    if rsp > entry.physicalStart and rsp < entry.physicalStart + entry.numberOfPages * PageSize:
+      stackBase = entry.physicalStart
+      stackPages = entry.numberOfPages
+      break
+
+  return (stackBase, stackPages)
+
+proc checkStatus*(status: EfiStatus) =
+  if status != EfiSuccess:
+    consoleOutError &" [failed, status = {status:#x}]"
+    quit()
+  consoleOutSuccess " [success]\r\n"
 
 proc unhandledException*(e: ref Exception) =
   echo "boot: Unhandled exception: " & e.msg & " [" & $e.name & "]"
@@ -229,15 +257,3 @@ proc unhandledException*(e: ref Exception) =
     echo getStackTrace(e)
     debugln getStackTrace(e)
   quit()
-
-proc NimMain() {.importc.}
-
-proc EfiMain(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus {.exportc.} =
-  NimMain()
-  uefi.sysTable = sysTable
-  consoleClear()
-
-  try:
-    return EfiMainInner(imgHandle, sysTable)
-  except Exception as e:
-    unhandledException(e)
