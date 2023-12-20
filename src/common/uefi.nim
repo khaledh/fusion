@@ -40,18 +40,39 @@ type
     testString*: pointer
     queryMode*: pointer
     setMode*: pointer
-    setAttribute*: pointer
+    setAttribute*: proc (this: ptr SimpleTextOutput, attr: uint64): EfiStatus {.cdecl.}
     clearScreen*: proc (this: ptr SimpleTextOutput): EfiStatus {.cdecl.}
     setCursorPos*: pointer
     enableCursor*: pointer
     mode*: ptr pointer
 
-# typedef enum {
-#    AllocateAnyPages,
-#    AllocateMaxAddress,
-#    AllocateAddress,
-#    MaxAllocateType
-# } EFI_ALLOCATE_TYPE;
+  SimpleTextForegroundColor* = enum
+    fgBlack
+    fgBlue
+    fgGreen
+    fgCyan
+    fgRed
+    fgMagenta
+    fgBrown
+    fgLightGray
+    fgDarkGray
+    fgLightBlue
+    fgLightGreen
+    fgLightCyan
+    fgLightRed
+    fgLightMagenta
+    fgYellow
+    fgWhite
+
+  SimpleTextBackgroundColor* = enum
+    bgBlack = 0x00
+    bgBlue = 0x10
+    bgGreen = 0x20
+    bgCyan = 0x30
+    bgRed = 0x40
+    bgMagenta = 0x50
+    bgBrown = 0x60
+    bgLightGray = 0x70
 
   EfiAllocateType* = enum
     AllocateAnyPages,
@@ -59,17 +80,26 @@ type
     AllocateAddress,
     MaxAllocateType,
 
-  EfiBootServices* {.byref.} = object
+  EfiBootServices* = object
     hdr*: EfiTableHeader
     # task priority services
     raiseTpl*: pointer
     restoreTpl*: pointer
     # memory services
-    allocatePages*: proc (allocateType: EfiAllocateType, memoryType: EfiMemoryType, pages: uint,
-        memory: ptr EfiPhysicalAddress): EfiStatus {.cdecl.}
+    allocatePages*: proc (
+        allocateType: EfiAllocateType,
+        memoryType: EfiMemoryType,
+        pages: uint,
+        memory: ptr EfiPhysicalAddress
+      ): EfiStatus {.cdecl.}
     freePages*: pointer
-    getMemoryMap*: proc (memoryMapSize: ptr uint, memoryMap: ptr EfiMemoryDescriptor,
-        mapKey: ptr uint, descriptorSize: ptr uint, descriptorVersion: ptr uint32): EfiStatus {.cdecl.}
+    getMemoryMap*: proc (
+        memoryMapSize: ptr uint,
+        memoryMap: ptr EfiMemoryDescriptor,
+        mapKey: ptr uint,
+        descriptorSize: ptr uint,
+        descriptorVersion: ptr uint32
+      ): EfiStatus {.cdecl.}
     allocatePool*: proc (poolType: EfiMemoryType, size: uint, buffer: ptr pointer): EfiStatus {.cdecl.}
     freePool*: pointer
     # event & timer services
@@ -120,7 +150,7 @@ type
     createEventEx*: pointer
 
   EfiMemoryType* = enum
-    EfiReservedMemoryType,
+    EfiReservedMemory,
     EfiLoaderCode,
     EfiLoaderData,
     EfiBootServicesCode,
@@ -135,7 +165,7 @@ type
     EfiMemoryMappedIOPortSpace,
     EfiPalCode,
     EfiPersistentMemory,
-    EfiUnacceptedMemoryType,
+    EfiUnacceptedMemory,
     EfiMaxMemoryType,
 
   EfiMemoryDescriptor* = object
@@ -168,7 +198,10 @@ type
 
   EfiSimpleFileSystemProtocol* = object
     revision*: uint64
-    openVolume*: proc (this: ptr EfiSimpleFileSystemProtocol, root: ptr ptr EfiFileProtocol): EfiStatus {.cdecl.}
+    openVolume*: proc (
+        this: ptr EfiSimpleFileSystemProtocol,
+        root: ptr ptr EfiFileProtocol
+      ): EfiStatus {.cdecl.}
 
   EfiFileProtocol* = object
     revision*: uint64
@@ -189,13 +222,13 @@ type
     writeEx*: pointer
     flushEx*: pointer
 
-  EfiFileSystemInfo* = object
-    size*: uint64
-    readOnly*: bool
-    volumeSize*: uint64
-    freeSpace*: uint64
-    blockSize*: uint32
-    volumeLabel*: array[32, Utf16Char]
+# EfiFileSystemInfo* = object
+  #   size*: uint64
+  #   readOnly*: bool
+  #   volumeSize*: uint64
+  #   freeSpace*: uint64
+  #   blockSize*: uint32
+  #   volumeLabel*: array[32, Utf16Char]
 
   EfiFileInfo* = object
     size*: uint64
@@ -206,20 +239,6 @@ type
     modificationTime*: EfiTime
     attribute*: uint64
     fileName*: array[256, Utf16Char]
-
-# typedef struct {
-#  UINT16 Year; // 1900 – 9999
-#  UINT8 Month; // 1 – 12
-#  UINT8 Day; // 1 – 31
-#  UINT8 Hour; // 0 – 23
-#  UINT8 Minute; // 0 – 59
-#  UINT8 Second; // 0 – 59
-#  UINT8 Pad1;
-#  UINT32 Nanosecond; // 0 – 999,999,999
-#  INT16 TimeZone; // -1440 to 1440 or 2047
-#  UINT8 Daylight;
-#  UINT8 Pad2;
-# } EFI_TIME;
 
   EfiTime* = object
     year*: uint16
@@ -238,9 +257,9 @@ const
   EfiSuccess* = 0'u64
   EfiLoadError* = 1'u64
 
-  EfiFileModeRead* = 0x0000000000000001
-  EfiFileModeWrite* = 0x0000000000000002
-  EfiFileModeCreate* = 0x8000000000000000
+  # EfiFileModeRead* = 0x0000000000000001
+  # EfiFileModeWrite* = 0x0000000000000002
+  # EfiFileModeCreate* = 0x8000000000000000
 
   EfiLoadedImageProtocolGuid* = EfiGuid(
     data1: 0x5B1B31A1, data2: 0x9562, data3: 0x11d2,
@@ -252,10 +271,10 @@ const
     data4: [0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b]
   )
 
-  EfiFileSystemInfoGuid* = EfiGuid(
-    data1: 0x9576e93'u32, data2: 0x6d3f, data3: 0x11d2,
-    data4: [0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b]
-  )
+  # EfiFileSystemInfoGuid* = EfiGuid(
+  #   data1: 0x9576e93'u32, data2: 0x6d3f, data3: 0x11d2,
+  #   data4: [0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b]
+  # )
 
   EfiFileInfoGuid* = EfiGuid(
     data1: 0x09576e92'u32, data2: 0x6d3f, data3: 0x11d2,
@@ -266,7 +285,7 @@ var
   sysTable*: ptr EfiSystemTable
 
 
-proc `W`*(s: static string): WideCString =
+proc `W`*(s: string): WideCString =
   result = newWideCString(s).toWideCString
 
 proc consoleClear*() =
@@ -279,10 +298,23 @@ proc consoleOut*(wstr: WideCString) =
 
 proc consoleOut*(str: string) =
   assert not sysTable.isNil
-  let msg = newWideCString(str).toWideCString
-  discard sysTable.conOut.outputString(sysTable.conOut, msg)
+  discard sysTable.conOut.outputString(sysTable.conOut, W(str))
 
 proc consoleError*(str: string) =
   assert not sysTable.isNil
-  let msg = newWideCString(str).toWideCString
-  discard sysTable.stdErr.outputString(sysTable.stdErr, msg)
+  discard sysTable.stdErr.outputString(sysTable.stdErr, W(str))
+
+proc consoleOutColor*(
+  str: string,
+  fg: SimpleTextForegroundColor,
+  bg: SimpleTextBackgroundColor = bgBlack
+) =
+  discard sysTable.conOut.setAttribute(sysTable.conOut, fg.uint + (bg.uint shl 4))
+  consoleOut(str)
+  discard sysTable.conOut.setAttribute(sysTable.conOut, fgLightGray.uint + (bgBlack.uint shl 4))
+
+proc consoleOutSuccess*(str: string) =
+  consoleOutColor(str, fgGreen)
+
+proc consoleOutError*(str: string) =
+  consoleOutColor(str, fgLightRed)

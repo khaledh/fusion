@@ -1,0 +1,88 @@
+const
+  PageSize* = 4096
+
+type
+  # Page Map Level 4 Entry
+  PML4Entry* {.packed.} = object
+    present* {.bitsize: 1.}: uint64      # bit      0
+    write* {.bitsize: 1.}: uint64        # bit      1
+    user* {.bitsize: 1.}: uint64         # bit      2
+    writeThrough* {.bitsize: 1.}: uint64 # bit      3
+    cacheDisable* {.bitsize: 1.}: uint64 # bit      4
+    accessed* {.bitsize: 1.}: uint64     # bit      5
+    ignored1* {.bitsize: 1.}: uint64     # bit      6
+    reserved1* {.bitsize: 1.}: uint64    # bit      7
+    ignored2* {.bitsize: 4.}: uint64     # bits 11: 8
+    physAddress* {.bitsize: 28.}: uint64 # bits 51:12
+    ignored3* {.bitsize: 11.}: uint64    # bits 62:52
+    xd* {.bitsize: 1.}: uint64           # bit     63
+
+  # Page Directory Pointer Table Entry
+  PDPTEntry* {.packed.} = object
+    present* {.bitsize: 1.}: uint64      # bit      0
+    write* {.bitsize: 1.}: uint64        # bit      1
+    user* {.bitsize: 1.}: uint64         # bit      2
+    writeThrough* {.bitsize: 1.}: uint64 # bit      3
+    cacheDisable* {.bitsize: 1.}: uint64 # bit      4
+    accessed* {.bitsize: 1.}: uint64     # bit      5
+    ignored1* {.bitsize: 1.}: uint64     # bit      6
+    pageSize* {.bitsize: 1.}: uint64     # bit      7
+    ignored2* {.bitsize: 4.}: uint64     # bits 11: 8
+    physAddress* {.bitsize: 28.}: uint64 # bits 51:12
+    ignored3* {.bitsize: 11.}: uint64    # bits 62:52
+    xd* {.bitsize: 1.}: uint64           # bit     63
+
+  # Page Directory Entry
+  PDEntry* {.packed.} = object
+    present* {.bitsize: 1.}: uint64      # bit      0
+    write* {.bitsize: 1.}: uint64        # bit      1
+    user* {.bitsize: 1.}: uint64         # bit      2
+    writeThrough* {.bitsize: 1.}: uint64 # bit      3
+    cacheDisable* {.bitsize: 1.}: uint64 # bit      4
+    accessed* {.bitsize: 1.}: uint64     # bit      5
+    ignored1* {.bitsize: 1.}: uint64     # bit      6
+    pageSize* {.bitsize: 1.}: uint64     # bit      7
+    ignored2* {.bitsize: 4.}: uint64     # bits 11: 8
+    physAddress* {.bitsize: 28.}: uint64 # bits 51:12
+    ignored3* {.bitsize: 11.}: uint64    # bits 62:52
+    xd* {.bitsize: 1.}: uint64           # bit     63
+
+  # Page Table Entry
+  PTEntry* {.packed.} = object
+    present* {.bitsize: 1.}: uint64      # bit      0
+    write* {.bitsize: 1.}: uint64        # bit      1
+    user* {.bitsize: 1.}: uint64         # bit      2
+    writeThrough* {.bitsize: 1.}: uint64 # bit      3
+    cacheDisable* {.bitsize: 1.}: uint64 # bit      4
+    accessed* {.bitsize: 1.}: uint64     # bit      5
+    dirty* {.bitsize: 1.}: uint64        # bit      6
+    pat* {.bitsize: 1.}: uint64          # bit      7
+    global* {.bitsize: 1.}: uint64       # bit      8
+    ignored1* {.bitsize: 3.}: uint64     # bits 11: 9
+    physAddress* {.bitsize: 28.}: uint64 # bits 51:12
+    ignored2* {.bitsize: 11.}: uint64    # bits 62:52
+    xd* {.bitsize: 1.}: uint64           # bit     63
+
+  # Page Map Level 4 Table
+  PML4Table* = ref object
+    entries* {.align(PageSize).}: array[512, PML4Entry]
+
+  # Page Directory Pointer Table
+  PDPTable* = ref object
+    entries* {.align(PageSize).}: array[512, PDPTEntry]
+
+  # Page Directory
+  PDTable* = ref object
+    entries* {.align(PageSize).}: array[512, PDEntry]
+
+  # Page Table
+  PTable* = ref object
+    entries* {.align(PageSize).}: array[512, PTEntry]
+
+  PageAccess* = enum
+    paRead = 0
+    paReadWrite = 1
+
+  PageMode* = enum
+    pmSupervisor = 0
+    pmUser = 1
