@@ -19,17 +19,10 @@ proc malloc*(size: csize_t): pointer {.exportc.} =
 proc calloc*(num: csize_t, size: csize_t): pointer {.exportc.} =
   result = malloc(size * num)
 
-proc free*(p: pointer) {.exportc.} =
-  discard
-
 proc realloc*(p: pointer, new_size: csize_t): pointer {.exportc.} =
   result = malloc(new_size)
   copyMem(result, p, new_size)
   free(p)
 
-
-proc aligned_malloc*(size: int, alignment: int): pointer {.exportc.} =
-  let p = malloc((size + alignment).csize_t)
-  let mask = (alignment - 1).uint
-  let aligned = (cast[uint](p) + mask) and not mask
-  result = cast[pointer](aligned)
+proc free*(p: pointer) {.exportc.} =
+  discard

@@ -32,7 +32,6 @@ proc KernelMainInner(
 ) =
   debugln ""
   debugln "kernel: Hello, world!"
-  quit()
 
   let numMemoryMapEntries = memoryMapSize div memoryMapDescriptorSize
 
