@@ -19,10 +19,10 @@ proc malloc*(size: csize_t): pointer {.exportc.} =
 proc calloc*(num: csize_t, size: csize_t): pointer {.exportc.} =
   result = malloc(size * num)
 
+proc free*(p: pointer) {.exportc.} =
+  discard
+
 proc realloc*(p: pointer, new_size: csize_t): pointer {.exportc.} =
   result = malloc(new_size)
   copyMem(result, p, new_size)
   free(p)
-
-proc free*(p: pointer) {.exportc.} =
-  discard
