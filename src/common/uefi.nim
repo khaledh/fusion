@@ -150,23 +150,27 @@ type
     createEventEx*: pointer
 
   EfiMemoryType* = enum
-    EfiReservedMemory,
-    EfiLoaderCode,
-    EfiLoaderData,
-    EfiBootServicesCode,
-    EfiBootServicesData,
-    EfiRuntimeServicesCode,
-    EfiRuntimeServicesData,
-    EfiConventionalMemory,
-    EfiUnusableMemory,
-    EfiACPIReclaimMemory,
-    EfiACPIMemoryNVS,
-    EfiMemoryMappedIO,
-    EfiMemoryMappedIOPortSpace,
-    EfiPalCode,
-    EfiPersistentMemory,
-    EfiUnacceptedMemory,
-    EfiMaxMemoryType,
+    EfiReservedMemory
+    EfiLoaderCode
+    EfiLoaderData
+    EfiBootServicesCode
+    EfiBootServicesData
+    EfiRuntimeServicesCode
+    EfiRuntimeServicesData
+    EfiConventionalMemory
+    EfiUnusableMemory
+    EfiACPIReclaimMemory
+    EfiACPIMemoryNVS
+    EfiMemoryMappedIO
+    EfiMemoryMappedIOPortSpace
+    EfiPalCode
+    EfiPersistentMemory
+    EfiUnacceptedMemory
+    OsvKernelCode = 0x80000000
+    OsvKernelData = 0x80000001
+    OsvKernelStack = 0x80000002
+    OsvUserCode = 0x80000003
+    EfiMaxMemoryType
 
   EfiMemoryDescriptor* = object
     `type`*: EfiMemoryType

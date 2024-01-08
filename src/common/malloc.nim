@@ -2,8 +2,15 @@
 
 import kernel/debugcon
 
+when defined(Heap4M):
+  const HeapSize = 1024 * 1024 * 4
+elif defined(Heap2M):
+  const HeapSize = 1024 * 1024 * 2
+else:
+  const HeapSize = 1024 * 1024
+
 var
-  heap*: array[2*1024*1024, byte]
+  heap*: array[HeapSize, byte]
   heapBumpPtr*: int = cast[int](addr heap[0])
   heapMaxPtr*: int = cast[int](addr heap[0]) + heap.high
 

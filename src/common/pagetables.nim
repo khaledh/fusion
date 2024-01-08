@@ -13,7 +13,7 @@ type
     ignored1* {.bitsize: 1.}: uint64     # bit      6
     reserved1* {.bitsize: 1.}: uint64    # bit      7
     ignored2* {.bitsize: 4.}: uint64     # bits 11: 8
-    physAddress* {.bitsize: 28.}: uint64 # bits 51:12
+    physAddress* {.bitsize: 40.}: uint64 # bits 51:12
     ignored3* {.bitsize: 11.}: uint64    # bits 62:52
     xd* {.bitsize: 1.}: uint64           # bit     63
 
@@ -28,7 +28,7 @@ type
     ignored1* {.bitsize: 1.}: uint64     # bit      6
     pageSize* {.bitsize: 1.}: uint64     # bit      7
     ignored2* {.bitsize: 4.}: uint64     # bits 11: 8
-    physAddress* {.bitsize: 28.}: uint64 # bits 51:12
+    physAddress* {.bitsize: 40.}: uint64 # bits 51:12
     ignored3* {.bitsize: 11.}: uint64    # bits 62:52
     xd* {.bitsize: 1.}: uint64           # bit     63
 
@@ -43,7 +43,7 @@ type
     ignored1* {.bitsize: 1.}: uint64     # bit      6
     pageSize* {.bitsize: 1.}: uint64     # bit      7
     ignored2* {.bitsize: 4.}: uint64     # bits 11: 8
-    physAddress* {.bitsize: 28.}: uint64 # bits 51:12
+    physAddress* {.bitsize: 40.}: uint64 # bits 51:12
     ignored3* {.bitsize: 11.}: uint64    # bits 62:52
     xd* {.bitsize: 1.}: uint64           # bit     63
 
@@ -58,25 +58,25 @@ type
     dirty* {.bitsize: 1.}: uint64        # bit      6
     pat* {.bitsize: 1.}: uint64          # bit      7
     global* {.bitsize: 1.}: uint64       # bit      8
-    ignored1* {.bitsize: 3.}: uint64     # bits 11: 9
-    physAddress* {.bitsize: 28.}: uint64 # bits 51:12
-    ignored2* {.bitsize: 11.}: uint64    # bits 62:52
+    ignored2* {.bitsize: 3.}: uint64     # bits 11: 9
+    physAddress* {.bitsize: 40.}: uint64 # bits 51:12
+    ignored3* {.bitsize: 11.}: uint64    # bits 62:52
     xd* {.bitsize: 1.}: uint64           # bit     63
 
   # Page Map Level 4 Table
-  PML4Table* = ref object
+  PML4Table* = object
     entries* {.align(PageSize).}: array[512, PML4Entry]
 
   # Page Directory Pointer Table
-  PDPTable* = ref object
+  PDPTable* = object
     entries* {.align(PageSize).}: array[512, PDPTEntry]
 
   # Page Directory
-  PDTable* = ref object
+  PDTable* = object
     entries* {.align(PageSize).}: array[512, PDEntry]
 
   # Page Table
-  PTable* = ref object
+  PTable* = object
     entries* {.align(PageSize).}: array[512, PTEntry]
 
   PageAccess* = enum
@@ -86,3 +86,9 @@ type
   PageMode* = enum
     pmSupervisor = 0
     pmUser = 1
+
+
+proc `[]`*(pml4: ptr PML4Table; index: uint64): var PML4Entry {.inline.} = pml4.entries[index]
+proc `[]`*(pdpt: ptr PDPTable; index: uint64): var PDPTEntry {.inline.} = pdpt.entries[index]
+proc `[]`*(pd: ptr PDTable; index: uint64): var PDEntry {.inline.} = pd.entries[index]
+proc `[]`*(pt: ptr PTable; index: uint64): var PTEntry {.inline.} = pt.entries[index]
