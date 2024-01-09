@@ -41,7 +41,7 @@ run *QEMU_ARGS: bootloader kernel user
     -machine q35 \
     -net none \
     -no-reboot \
-    -monitor stdio {{QEMU_ARGS}}
+    -debugcon stdio {{QEMU_ARGS}}
 
 clean:
   rm -rf build

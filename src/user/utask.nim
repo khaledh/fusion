@@ -2,32 +2,25 @@ import common/[libc, malloc]
 
 {.used.}
 
-let hello = "hello from user mode"
+proc NimMain() {.importc.}
+
+let
+  msg = "user: Hello from user mode!"
+  pmsg = msg.addr
 
 proc UserMain*() {.exportc, stackTrace: off.} =
+  NimMain()
+
   # do a syscall
-  let saddr = hello.addr
   asm """
     mov rdi, 5
     mov rsi, %0
+    syscall
+
   .loop1:
     pause
     jmp .loop1
-    syscall
     :
-    : "r"(`saddr`)
+    : "r"(`pmsg`)
     : "rdi", "rsi"
   """
-
-  asm """
-  .loop:
-    pause
-    jmp .loop
-  """
-
-  # asm "hlt"
-
-  # access illegal memory
-  # var x = cast[ptr int](0xFFFF800000100000)
-  # x[] = 42
-  # asm "int 100"

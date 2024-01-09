@@ -56,12 +56,8 @@ proc syscallEntry() {.asmNoStackFrame.} =
   """
 
 proc syscall(frame: ptr SyscallFrame): uint64 {.exportc.} =
-  # TODO: dispatch syscall
   debugln &"syscall: num={frame.num}"
-  debugln &"syscall: arg1={frame.arg1:#x}"
   let s = cast[ptr string](frame.arg1)
-  # for i in 0 ..< 10:
-  #   debugln &"syscall: s[{i}]={s[i]:#x}"
   debugln s[]
   debugln &"syscall: returning"
 
