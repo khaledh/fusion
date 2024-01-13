@@ -78,11 +78,14 @@ proc exit*(args: ptr SyscallArgs): uint64 {.cdecl.} =
 
 proc print*(args: ptr SyscallArgs): uint64 {.cdecl.} =
   debugln "syscall: print"
-  if args.arg1 >= UserAddrSpaceEnd:
+
+  if args.arg1 > UserAddrSpaceEnd:
     debugln "syscall: print: Invalid pointer"
     return InvalidArg.uint64
+
   let s = cast[ptr string](args.arg1)
   debugln s[]
+
   result = 0
 
 

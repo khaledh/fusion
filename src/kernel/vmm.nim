@@ -59,34 +59,24 @@ proc v2p*(virt: VirtAddr): Option[PhysAddr] =
   var pdIndex = (virt.uint64 shr 21) and 0x1FF
   var ptIndex = (virt.uint64 shr 12) and 0x1FF
 
-  # debugln &"v2p: pml4Index = {pml4Index} pdptIndex = {pdptIndex} pdIndex = {pdIndex} ptIndex = {ptIndex}"
-
   if pml4[pml4Index].present == 0:
     result = none(PhysAddr)
     return
-  # debugln &"v2p: pml4[{pml4Index}] found"
   let pdptPhysAddr = PhysAddr(pml4[pml4Index].physAddress shl 12)
   let pdpt = cast[ptr PDPTable](p2v(pdptPhysAddr))
-  # debugln &"v2p: pdpt = {cast[uint64](pdpt):#x} -> {pdptPhysAddr.uint64:#x}"
   if pdpt[pdptIndex].present == 0:
     result = none(PhysAddr)
     return
-  # debugln &"v2p: pdpt[{pdptIndex}] found"
   let pdPhysAddr = PhysAddr(pdpt[pdptIndex].physAddress shl 12)
   let pd = cast[ptr PDTable](p2v(pdPhysAddr))
-  # debugln &"v2p: pd = {cast[uint64](pd):#x} -> {pdPhysAddr.uint64:#x}"
   if pd[pdIndex].present == 0:
     result = none(PhysAddr)
     return
-  # debugln &"v2p: pd[{pdIndex}] found"
   let ptPhysAddr = PhysAddr(pd[pdIndex].physAddress shl 12)
   let pt = cast[ptr PTable](p2v(ptPhysAddr))
-  # debugln &"v2p: pt = {cast[uint64](pt):#x} -> {ptPhysAddr.uint64:#x}"
   if pt[ptIndex].present == 0:
     result = none(PhysAddr)
     return
-  # debugln &"v2p: pt[{ptIndex}] found"
-  # debugln &"v2p: virt = {virt.uint64:#018x} -> phys = {PhysAddr(pt[ptIndex].physAddress shl 12).uint64:#018x}"
   result = some PhysAddr(pt[ptIndex].physAddress shl 12)
 
 
@@ -191,8 +181,9 @@ proc identityMapRegion*(
 
 
 ####################################################################################################
-# Install a page table into CR3
+# Dump page tables
 ####################################################################################################
+
 proc sar*(x: uint64, y: int): uint64 {.inline.} =
   asm """
     mov rcx, %1
@@ -251,21 +242,3 @@ proc dumpPageTable*(pml4: ptr PML4Table) =
                   if first and ptIndex < 511 and pt.entries[ptIndex+1].present == 1:
                     debugln "        ..."
                     first = false
-
-type
-  CR3 = object
-    ignored1 {.bitsize: 3.}: uint64 = 0
-    writeThrough {.bitsize: 1.}: uint64 = 0
-    cacheDisable {.bitsize: 1.}: uint64 = 0
-    ignored2 {.bitsize: 7.}: uint64 = 0
-    physAddress {.bitsize: 40.}: uint64
-    ignored3 {.bitsize: 12.}: uint64 = 0
-
-proc installPageTable*(pml4PhysAddress: uint64) =
-  let cr3obj = CR3(physAddress: pml4PhysAddress shr 12)
-  let cr3 = cast[uint64](cr3obj)
-  asm """
-    mov cr3, %0
-    :
-    : "r"(`cr3`)
-  """
