@@ -8,18 +8,19 @@ let
   msg = "user: Hello from user mode!"
   pmsg = msg.addr
 
-proc UserMain*() {.exportc, stackTrace: off.} =
+proc UserMain*() {.exportc.} =
   NimMain()
 
-  # do a syscall
   asm """
-    mov rdi, 5
+    # call print
+    mov rdi, 2
     mov rsi, %0
     syscall
 
-  .loop1:
-    pause
-    jmp .loop1
+    # call exit
+    mov rdi, 1
+    mov rsi, 0
+    syscall
     :
     : "r"(`pmsg`)
     : "rdi", "rsi"

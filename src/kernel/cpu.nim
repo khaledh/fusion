@@ -14,8 +14,8 @@ proc readMSR*(ecx: uint32): uint64 =
   var eax, edx: uint32
   asm """
     rdmsr
-    :"=a"(`eax`), "=d"(`edx`)
-    :"c"(`ecx`)
+    : "=a"(`eax`), "=d"(`edx`)
+    : "c"(`ecx`)
   """
   result = (edx.uint64 shl 32) or eax
 
@@ -26,5 +26,5 @@ proc writeMSR*(ecx: uint32, value: uint64) =
   asm """
     wrmsr
     :
-    :"a"(`eax`), "d"(`edx`), "c"(`ecx`)
+    : "c"(`ecx`), "a"(`eax`), "d"(`edx`)
   """

@@ -5,14 +5,22 @@ import cpu
 import gdt
 
 type
-  SyscallFrame = object
+  SyscallHandler = proc (args: ptr SyscallArgs): uint64 {.cdecl.}
+  SyscallArgs = object
     num: uint64
     arg1, arg2, arg3, arg4, arg5: uint64
+  SyscallError* = enum
+    None
+    InvalidSyscall
+    InvalidArg
+
+const
+  UserAddrSpaceEnd* = 0x00007FFFFFFFFFFF'u64
 
 var
-  kernelStack: array[4096, byte]
-  kernelStackEnd = cast[uint64](kernelStack.addr) + kernelStack.len.uint64
-  userStackPtr: uint64
+  syscallTable: array[256, SyscallHandler]
+  kernelStackAddr: uint64
+  userRsp: uint64
 
 proc syscallEntry() {.asmNoStackFrame.} =
   asm """
@@ -50,19 +58,41 @@ proc syscallEntry() {.asmNoStackFrame.} =
     mov rsp, %0
 
     sysretq
-    : "+r"(`userStackPtr`)
-    : "m"(`kernelStackEnd`)
-    : "rcx", "r11", "rdi", "rsi", "rdx", "rcx", "r8", "r9"
+    : "+r"(`userRsp`)
+    : "m"(`kernelStackAddr`)
+    : "rcx", "r11", "rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax"
   """
 
-proc syscall(frame: ptr SyscallFrame): uint64 {.exportc.} =
-  debugln &"syscall: num={frame.num}"
-  let s = cast[ptr string](frame.arg1)
+proc syscall(args: ptr SyscallArgs): uint64 {.exportc.} =
+  debugln &"syscall: num={args.num}"
+  if args.num > syscallTable.high.uint64 or syscallTable[args.num] == nil:
+    return InvalidSyscall.uint64
+  result = syscallTable[args.num](args)
+
+proc exit*(args: ptr SyscallArgs): uint64 {.cdecl.} =
+  debugln &"syscall: exit: code={args.arg1}"
+  asm """
+    cli
+    hlt
+  """
+
+proc print*(args: ptr SyscallArgs): uint64 {.cdecl.} =
+  debugln "syscall: print"
+  if args.arg1 >= UserAddrSpaceEnd:
+    debugln "syscall: print: Invalid pointer"
+    return InvalidArg.uint64
+  let s = cast[ptr string](args.arg1)
   debugln s[]
-  debugln &"syscall: returning"
+  result = 0
 
 
-proc syscallInit*() =
+proc syscallInit*(kernelStack: uint64) =
+  kernelStackAddr = kernelStack
+
+  # set up syscall table
+  syscallTable[1] = exit
+  syscallTable[2] = print
+
   # enable syscall feature
   writeMSR(IA32_EFER, readMSR(IA32_EFER) or 1)  # Bit 0: SYSCALL Enable
 

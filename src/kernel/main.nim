@@ -83,9 +83,6 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   idtInit()
   debugln "[success]"
 
-  debug "kernel: Initializing Syscalls "
-  syscallInit()
-
   # debugln &"kernel: User image physical address: {bootInfo.userImagePhysicalBase:#010x}"
   # debugln &"kernel: User image pages: {bootInfo.userImagePages}"
 
@@ -183,6 +180,10 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   debugln &"           RIP: {userStackPtr[^5]:#x}"
 
   let rsp = cast[uint64](userStackBottom - 5 * 8)
+
+  debug "kernel: Initializing Syscalls "
+  syscallInit(tss.rsp0)
+  debugln "[success]"
 
   debugln "kernel: Switching to user mode"
   setActivePML4(upml4)
