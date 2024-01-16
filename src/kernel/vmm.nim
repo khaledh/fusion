@@ -15,19 +15,26 @@ type
     npages: uint64
 
   VMAddressSpace* = object
-    minAddress: VirtAddr
-    maxAddress: VirtAddr
-    regions: seq[VMRegion]
-    pml4: ptr PML4Table
-  
-  VMAllocType* = enum
-    AnyAddress
-    MaxAddress
-    ExactAddress
+    minAddress*: VirtAddr
+    maxAddress*: VirtAddr
+    regions*: seq[VMRegion]
+    pml4*: ptr PML4Table
+
+  # VMAllocType* = enum
+  #   AnyAddress
+  #   MaxAddress
+  #   ExactAddress
+
+const
+  KernelSpaceMinAddress* = 0xffff800000000000'u64.VirtAddr
+  KernelSpaceMaxAddress* = 0xffffffffffffffff'u64.VirtAddr
+  UserSpaceMinAddress* = 0x0000000000000000'u64.VirtAddr
+  UserSpaceMaxAddress* = 0x00007fffffffffff'u64.VirtAddr
 
 var
   physicalMemoryVirtualBase: uint64
   pmalloc: PhysAlloc
+  kspace*: VMAddressSpace
 
 template `+!`*(p: VirtAddr, offset: uint64): VirtAddr =
   VirtAddr(cast[uint64](p) + offset)
@@ -35,10 +42,22 @@ template `+!`*(p: VirtAddr, offset: uint64): VirtAddr =
 template `-!`*(p: VirtAddr, offset: uint64): VirtAddr =
   VirtAddr(cast[uint64](p) - offset)
 
+proc `==`*(a: VirtAddr, b: VirtAddr): bool =  cast[uint64](a) == cast[uint64](b)
+proc `<`*(a: VirtAddr, b: VirtAddr): bool =  cast[uint64](a) < cast[uint64](b)
+proc `<=`*(a: VirtAddr, b: VirtAddr): bool =  cast[uint64](a) <= cast[uint64](b)
 
 proc vmInit*(physMemoryVirtualBase: uint64, physAlloc: PhysAlloc) =
   physicalMemoryVirtualBase = physMemoryVirtualBase
   pmalloc = physAlloc
+  kspace = VMAddressSpace(
+    minAddress: KernelSpaceMinAddress,
+    maxAddress: KernelSpaceMaxAddress,
+    regions: @[],
+    pml4: getActivePML4(),
+  )
+
+proc vmAddRegion*(space: var VMAddressSpace, start: VirtAddr, npages: uint64) =
+  space.regions.add VMRegion(start: start, npages: npages)
 
 ####################################################################################################
 # Mapping between virtual and physical addresses
@@ -47,12 +66,10 @@ proc vmInit*(physMemoryVirtualBase: uint64, physAlloc: PhysAlloc) =
 proc p2v*(phys: PhysAddr): VirtAddr =
   result = cast[VirtAddr](phys +! physicalMemoryVirtualBase)
 
-proc v2p*(virt: VirtAddr): Option[PhysAddr] =
+proc v2p*(virt: VirtAddr, pml4: ptr PML4Table): Option[PhysAddr] =
   if physicalMemoryVirtualBase == 0:
     # identity mapped
     return some PhysAddr(cast[uint64](virt))
-
-  let pml4 = getActivePML4()
 
   var pml4Index = (virt.uint64 shr 39) and 0x1FF
   var pdptIndex = (virt.uint64 shr 30) and 0x1FF
@@ -78,6 +95,9 @@ proc v2p*(virt: VirtAddr): Option[PhysAddr] =
     result = none(PhysAddr)
     return
   result = some PhysAddr(pt[ptIndex].physAddress shl 12)
+
+proc v2p(virt: VirtAddr): Option[PhysAddr] =
+  v2p(virt, getActivePML4())
 
 
 ####################################################################################################
@@ -110,7 +130,6 @@ proc getOrCreateEntry[P, C](parent: ptr P, index: uint64): ptr C =
     physAddr = PhysAddr(parent[index].physAddress shl 12)
   else:
     physAddr = pmalloc(1).get # TODO: handle allocation failure
-    # debugln &"getOrCreateEntry: allocated page at {physAddr.uint64:#x}"
     parent[index].physAddress = physAddr.uint64 shr 12
     parent[index].present = 1
   result = cast[ptr C](p2v(physAddr))
@@ -133,19 +152,16 @@ proc mapPage(
   # Page Map Level 4 Table
   pml4[pml4Index].write = access
   pml4[pml4Index].user = mode
-  # debugln "calling getOrCreateEntry for PDPTable"
   var pdpt = getOrCreateEntry[PML4Table, PDPTable](pml4, pml4Index)
 
   # Page Directory Pointer Table
   pdpt[pdptIndex].write = access
   pdpt[pdptIndex].user = mode
-  # debugln "calling getOrCreateEntry for PDTable"
   var pd = getOrCreateEntry[PDPTable, PDTable](pdpt, pdptIndex)
 
   # Page Directory
   pd[pdIndex].write = access
   pd[pdIndex].user = mode
-  # debugln "calling getOrCreateEntry for PTable"
   var pt = getOrCreateEntry[PDTable, PTable](pd, pdIndex)
 
   # Page Table
@@ -178,6 +194,33 @@ proc identityMapRegion*(
   pageMode: PageMode,
 ) =
   mapRegion(pml4, physAddr.VirtAddr, physAddr, pageCount, pageAccess, pageMode)
+
+
+####################################################################################################
+# Allocate a range of virtual addresses
+####################################################################################################
+
+proc vmalloc*(
+  space: var VMAddressSpace,
+  pageCount: uint64,
+  pageAccess: PageAccess,
+  pageMode: PageMode,
+): Option[VirtAddr] =
+  # find a free region
+  var virtAddr: VirtAddr = space.minAddress
+  for region in space.regions:
+    if virtAddr +! pageCount * PageSize <= region.start:
+      break
+    virtAddr = region.start +! region.npages * PageSize
+
+  # allocate physical memory and map it
+  let  physAddr = pmalloc(pageCount).get # TODO: handle allocation failure
+  mapRegion(space.pml4, virtAddr, physAddr, pageCount, pageAccess, pageMode)
+
+  # add the region to the address space
+  space.regions.add VMRegion(start: virtAddr, npages: pageCount)
+
+  result = some virtAddr
 
 
 ####################################################################################################

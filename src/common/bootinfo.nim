@@ -22,5 +22,11 @@ type
     physicalMemoryMap*: MemoryMap
     virtualMemoryMap*: MemoryMap
     physicalMemoryVirtualBase*: uint64
+    kernelImageVirtualBase*: uint64
+    kernelImagePhysicalBase*: uint64
+    kernelImagePages*: uint64
+    kernelStackVirtualBase*: uint64
+    kernelStackPhysicalBase*: uint64
+    kernelStackPages*: uint64
     userImagePhysicalBase*: uint64
     userImagePages*: uint64

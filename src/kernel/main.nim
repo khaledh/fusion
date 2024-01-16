@@ -1,4 +1,4 @@
-import std/[options, strformat]
+import std/strformat
 
 import common/[bootinfo, libc, malloc, pagetables]
 import debugcon
@@ -6,6 +6,7 @@ import idt
 import gdt
 import pmm
 import syscalls
+import tasks
 import vmm
 
 const
@@ -66,6 +67,8 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
 
   debug "kernel: Initializing virtual memory manager "
   vmInit(bootInfo.physicalMemoryVirtualBase, pmm.pmAlloc)
+  vmAddRegion(kspace, bootInfo.kernelImageVirtualBase.VirtAddr, bootInfo.kernelImagePages)
+  vmAddRegion(kspace, bootInfo.kernelStackVirtualBase.VirtAddr, bootInfo.kernelStackPages)
   debugln "[success]"
 
 
@@ -83,119 +86,20 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   idtInit()
   debugln "[success]"
 
-  # debugln &"kernel: User image physical address: {bootInfo.userImagePhysicalBase:#010x}"
-  # debugln &"kernel: User image pages: {bootInfo.userImagePages}"
-
-  # debugln ""
-  # debugln &"Memory Map ({bootInfo.physicalMemoryMap.len} entries):"
-  # debug &"""   {"Entry"}"""
-  # debug &"""   {"Type":12}"""
-  # debug &"""   {"Start":>12}"""
-  # debug &"""   {"Start (KB)":>15}"""
-  # debug &"""   {"#Pages":>10}"""
-  # debugln ""
-
-  # totalFreePages = 0
-  # for i in 0 ..< bootInfo.physicalMemoryMap.len:
-  #   let entry = bootInfo.physicalMemoryMap.entries[i]
-  #   debug &"   {i:>5}"
-  #   debug &"   {entry.type:12}"
-  #   debug &"   {entry.start:>#12x}"
-  #   debug &"   {entry.start div 1024:>#15}"
-  #   debug &"   {entry.nframes:>#10}"
-  #   debugln ""
-  #   if entry.type == MemoryType.Free:
-  #     totalFreePages += entry.nframes
-
-  # debugln ""
-  # debugln &"Total free: {totalFreePages * 4} KiB ({totalFreePages * 4 div 1024} MiB)"
-
-  var kpml4 = getActivePML4()
-  # dumpPageTable(kpml4)
-
-
-  debugln "kernel: Initializing user page table"
-  var upml4 = cast[ptr PML4Table](new PML4Table)
-  # debugln &" (upml4: {cast[uint64](upml4):#x})"
-
-  # copy kernel page table (upper half)
-  debugln "kernel:   Copying kernel space user page table"
-  for i in 256 ..< 512:
-    upml4.entries[i] = kpml4.entries[i]
-
-  # map user image
-  debugln &"kernel:   Mapping user image ({UserImageVirtualBase} -> {bootInfo.userImagePhysicalBase:#x})"
-  mapRegion(
-    pml4 = upml4,
-    virtAddr = UserImageVirtualBase.VirtAddr,
-    physAddr = bootInfo.userImagePhysicalBase.PhysAddr,
-    pageCount = bootInfo.userImagePages,
-    pageAccess = paReadWrite,
-    pageMode = pmUser,
+  debugln "kernel: Creating user task"
+  var task = createTask(
+    imageVirtAddr = UserImageVirtualBase.VirtAddr,
+    imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
+    imagePageCount = bootInfo.userImagePages,
+    entryPoint = UserImageVirtualBase.VirtAddr
   )
-
-  # allocate and map user stack
-  let userStackPhysAddr = pmAlloc(1).get
-  debugln &"kernel:   Mapping user stack ({UserStackVirtualBase:#x} -> {userStackPhysAddr.uint64:#x})"
-  mapRegion(
-    pml4 = upml4,
-    virtAddr = UserStackVirtualBase.VirtAddr,
-    physAddr = userStackPhysAddr,
-    pageCount = 1,
-    pageAccess = paReadWrite,
-    pageMode = pmUser,
-  )
-
-  # create a kernel switch stack and set tss.rsp0
-  debugln "kernel: Creating kernel switch stack"
-  let switchStackPhysAddr = pmAlloc(1).get
-  let switchStackVirtAddr = p2v(switchStackPhysAddr)
-  mapRegion(
-    pml4 = kpml4,
-    virtAddr = switchStackVirtAddr,
-    physAddr = switchStackPhysAddr,
-    pageCount = 1,
-    pageAccess = paReadWrite,
-    pageMode = pmSupervisor,
-  )
-  tss.rsp0 = uint64(switchStackVirtAddr +! PageSize)
-
-  # debugln "Dumping page table:"
-  # debugln &" (pml4: {cast[uint64](pml4):#x})"
-  # dumpPageTable(upml4)
-  # debugln "Done"
-
-  debugln "kernel: Creating interrupt stack frame"
-  let userStackBottom = UserStackVirtualBase + PageSize
-  let userStackPtr = cast[ptr array[512, uint64]](p2v(userStackPhysAddr))
-  userStackPtr[^1] = cast[uint64](DataSegmentSelector) # SS
-  userStackPtr[^2] = cast[uint64](userStackBottom) # RSP
-  userStackPtr[^3] = cast[uint64](0x202) # RFLAGS
-  userStackPtr[^4] = cast[uint64](UserCodeSegmentSelector) # CS
-  userStackPtr[^5] = cast[uint64](UserImageVirtualBase) # RIP
-  debugln &"            SS: {userStackPtr[^1]:#x}"
-  debugln &"           RSP: {userStackPtr[^2]:#x}"
-  debugln &"        RFLAGS: {userStackPtr[^3]:#x}"
-  debugln &"            CS: {userStackPtr[^4]:#x}"
-  debugln &"           RIP: {userStackPtr[^5]:#x}"
-
-  let rsp = cast[uint64](userStackBottom - 5 * 8)
 
   debug "kernel: Initializing Syscalls "
-  syscallInit(tss.rsp0)
+  syscallInit(task.kstack.bottom)
   debugln "[success]"
 
   debugln "kernel: Switching to user mode"
-  setActivePML4(upml4)
-  asm """
-    mov rsp, %0
-    mov rbp, rsp
-    iretq
-    :
-    : "r"(`rsp`)
-  """
-
-  quit()
+  switchTo(task)
 
 proc unhandledException*(e: ref Exception) =
   debugln ""
