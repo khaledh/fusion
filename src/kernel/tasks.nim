@@ -11,6 +11,7 @@ type
   TaskStack* = object
     data*: ptr UncheckedArray[uint64]
     size*: uint64
+    bottom*: uint64
 
   Task* = ref object
     id*: uint64
@@ -20,12 +21,16 @@ type
     rsp*: uint64
 
 var
-  nextId*: uint64 = 0
+  nextId: uint64 = 0
+  currentTask* {.exportc.}: Task
 
-
-proc bottom*(s: TaskStack): uint64 =
-  result = cast[uint64](s.data) + s.size
-
+proc createStack*(space: var VMAddressSpace, npages: uint64, mode: PageMode): TaskStack =
+  let stackPtr = vmalloc(space, npages, paReadWrite, mode)
+  if stackPtr.isNone:
+    raise newException(Exception, "tasks: Failed to allocate stack")
+  result.data = cast[ptr UncheckedArray[uint64]](stackPtr.get)
+  result.size = npages * PageSize
+  result.bottom = cast[uint64](result.data) + result.size
 
 proc createTask*(
   imageVirtAddr: VirtAddr,
@@ -59,23 +64,9 @@ proc createTask*(
   for i in 256 ..< 512:
     uspace.pml4.entries[i] = kpml4.entries[i]
 
-  # create user stack
-  let ustackRegion = vmalloc(uspace, 1, paReadWrite, pmUser)
-  if ustackRegion.isNone:
-    raise newException(Exception, "tasks: Failed to allocate user stack")
-  let ustack = TaskStack(
-    data: cast[ptr UncheckedArray[uint64]](ustackRegion.get),
-    size: 1 * PageSize
-  )
-
-  # create kernel stack
-  let kstackRegion = vmalloc(kspace, 1, paReadWrite, pmSupervisor)
-  if kstackRegion.isNone:
-    raise newException(Exception, "tasks: Failed to allocate kernel stack")
-  let kstack = TaskStack(
-    data: cast[ptr UncheckedArray[uint64]](kstackRegion.get),
-    size: 1 * PageSize
-  )
+  # create user and kernel stacks
+  let ustack = createStack(uspace, 1, pmUser)
+  let kstack = createStack(kspace, 1, pmSupervisor)
 
   # create interrupt stack frame on the kernel stack
   var index = kstack.size div 8
@@ -92,6 +83,7 @@ proc createTask*(
   result.rsp = cast[uint64](kstack.data[index - 5].addr)
 
 proc switchTo*(task: var Task) {.noreturn.} =
+  currentTask = task
   tss.rsp0 = task.kstack.bottom
   let rsp = task.rsp
   setActivePML4(task.space.pml4)

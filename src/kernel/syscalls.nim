@@ -3,6 +3,7 @@ import std/strformat
 import debugcon
 import cpu
 import gdt
+import tasks
 
 type
   SyscallHandler = proc (args: ptr SyscallArgs): uint64 {.cdecl.}
@@ -19,8 +20,7 @@ const
 
 var
   syscallTable: array[256, SyscallHandler]
-  kernelStackAddr: uint64
-  userRsp: uint64
+  currentTask {.importc.}: Task
 
 proc syscallEntry() {.asmNoStackFrame.} =
   asm """
@@ -58,8 +58,8 @@ proc syscallEntry() {.asmNoStackFrame.} =
     mov rsp, %0
 
     sysretq
-    : "+r"(`userRsp`)
-    : "m"(`kernelStackAddr`)
+    : "+r"(`currentTask`->rsp)
+    : "m"(`currentTask`->kstack.bottom)
     : "rcx", "r11", "rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax"
   """
 
@@ -89,9 +89,7 @@ proc print*(args: ptr SyscallArgs): uint64 {.cdecl.} =
   result = 0
 
 
-proc syscallInit*(kernelStack: uint64) =
-  kernelStackAddr = kernelStack
-
+proc syscallInit*() =
   # set up syscall table
   syscallTable[1] = exit
   syscallTable[2] = print

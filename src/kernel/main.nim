@@ -86,6 +86,10 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   idtInit()
   debugln "[success]"
 
+  debug "kernel: Initializing Syscalls "
+  syscallInit()
+  debugln "[success]"
+
   debugln "kernel: Creating user task"
   var task = createTask(
     imageVirtAddr = UserImageVirtualBase.VirtAddr,
@@ -93,10 +97,6 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
     imagePageCount = bootInfo.userImagePages,
     entryPoint = UserImageVirtualBase.VirtAddr
   )
-
-  debug "kernel: Initializing Syscalls "
-  syscallInit(task.kstack.bottom)
-  debugln "[success]"
 
   debugln "kernel: Switching to user mode"
   switchTo(task)
