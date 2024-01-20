@@ -3,6 +3,7 @@ import std/strformat
 
 import common/pagetables
 import debugcon
+import loader
 import gdt
 import pmm
 import vmm
@@ -59,6 +60,20 @@ proc createTask*(
     pageMode = pmUser,
   )
 
+  # temporarily map the user image in kernel space
+  mapRegion(
+    pml4 = kspace.pml4,
+    virtAddr = imageVirtAddr,
+    physAddr = imagePhysAddr,
+    pageCount = imagePageCount,
+    pageAccess = paReadWrite,
+    pageMode = pmSupervisor,
+  )
+  # apply relocations to user image
+  debugln "kernel: Applying relocations to user image"
+  let realEntryPoint = applyRelocations(cast[ptr UncheckedArray[byte]](imageVirtAddr))
+
+
   # map kernel space
   var kpml4 = getActivePML4()
   for i in 256 ..< 512:
@@ -74,7 +89,7 @@ proc createTask*(
   kstack.data[index - 2] = cast[uint64](ustack.bottom) # RSP
   kstack.data[index - 3] = cast[uint64](0x202) # RFLAGS
   kstack.data[index - 4] = cast[uint64](UserCodeSegmentSelector) # CS
-  kstack.data[index - 5] = cast[uint64](entryPoint) # RIP
+  kstack.data[index - 5] = cast[uint64](realEntryPoint) # RIP
 
   result.id = taskId
   result.space = uspace

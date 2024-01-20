@@ -18,20 +18,20 @@ ovmf_vars := "ovmf/OVMF_VARS.fd"
 disk_image_dir := "diskimg"
 
 bootloader:
-  nim c {{nimflags}} --out:build/{{boot_out}} {{boot_nim}}
+  nim c {{nimflags}} --out:build/boot/{{boot_out}} {{boot_nim}}
 
 kernel:
-  nim c {{nimflags}} --out:build/{{kernel_out}} {{kernel_nim}}
+  nim c {{nimflags}} --out:build/kernel/{{kernel_out}} {{kernel_nim}}
 
 user:
-  nim c {{nimflags}} --out:build/{{user_out}} {{user_nim}}
+  nim c {{nimflags}} --out:build/user/{{user_out}} {{user_nim}}
 
 run *QEMU_ARGS: bootloader kernel user
   mkdir -p {{disk_image_dir}}/efi/boot
   mkdir -p {{disk_image_dir}}/efi/fusion
-  cp build/{{boot_out}} {{disk_image_dir}}/efi/boot/{{boot_out}}
-  cp build/{{kernel_out}} {{disk_image_dir}}/efi/fusion/{{kernel_out}}
-  cp build/{{user_out}} {{disk_image_dir}}/efi/fusion/{{user_out}}
+  cp build/boot/{{boot_out}} {{disk_image_dir}}/efi/boot/{{boot_out}}
+  cp build/kernel/{{kernel_out}} {{disk_image_dir}}/efi/fusion/{{kernel_out}}
+  cp build/user/{{user_out}} {{disk_image_dir}}/efi/fusion/{{user_out}}
 
   @echo ""
   /Users/khaledhammouda/src/github.com/qemu/qemu/build/qemu-system-x86_64 \

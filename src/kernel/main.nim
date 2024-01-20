@@ -3,6 +3,7 @@ import std/strformat
 import common/[bootinfo, libc, malloc, pagetables]
 import debugcon
 import idt
+import loader
 import gdt
 import pmm
 import syscalls

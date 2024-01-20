@@ -1,11 +1,9 @@
 import common/[libc, malloc]
 
-{.used.}
-
 proc NimMain() {.importc.}
 
 let
-  msg = "user: Hello from user mode!"
+  msg = "Hello from user mode!"
   pmsg = msg.addr
 
 proc UserMain*() {.exportc.} =

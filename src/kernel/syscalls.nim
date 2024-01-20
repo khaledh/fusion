@@ -83,6 +83,10 @@ proc print*(args: ptr SyscallArgs): uint64 {.cdecl.} =
     debugln "syscall: print: Invalid pointer"
     return InvalidArg.uint64
 
+  # debugln &"syscall: print: arg1={args.arg1:#x}"
+  # debugln &"syscall: print: arg1[0]={cast[ptr uint64](args.arg1)[]:#x}"
+  # debugln &"syscall: print: arg1[1]={cast[ptr uint64](args.arg1 + 8)[]:#x}"
+
   let s = cast[ptr string](args.arg1)
   debugln s[]
 
