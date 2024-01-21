@@ -1,9 +1,8 @@
 import std/strformat
 
-import common/[bootinfo, libc, malloc, pagetables]
+import common/[bootinfo, libc, malloc]
 import debugcon
 import idt
-import loader
 import gdt
 import pmm
 import syscalls
@@ -11,8 +10,8 @@ import tasks
 import vmm
 
 const
-  UserImageVirtualBase = 0x0000000040000000
-  UserStackVirtualBase = 0x0000000050000000
+  UserImageVirtualBase = 0x80000000
+  UserStackVirtualBase = 0x90000000
 
 proc NimMain() {.importc.}
 proc KernelMainInner(bootInfo: ptr BootInfo)
@@ -96,7 +95,6 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
     imageVirtAddr = UserImageVirtualBase.VirtAddr,
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
     imagePageCount = bootInfo.userImagePages,
-    entryPoint = UserImageVirtualBase.VirtAddr
   )
 
   debugln "kernel: Switching to user mode"

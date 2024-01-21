@@ -37,7 +37,6 @@ proc createTask*(
   imageVirtAddr: VirtAddr,
   imagePhysAddr: PhysAddr,
   imagePageCount: uint64,
-  entryPoint: VirtAddr
 ): Task =
   new(result)
 
@@ -71,8 +70,7 @@ proc createTask*(
   )
   # apply relocations to user image
   debugln "kernel: Applying relocations to user image"
-  let realEntryPoint = applyRelocations(cast[ptr UncheckedArray[byte]](imageVirtAddr))
-
+  let entryPoint = applyRelocations(cast[ptr UncheckedArray[byte]](imageVirtAddr))
 
   # map kernel space
   var kpml4 = getActivePML4()
@@ -89,7 +87,7 @@ proc createTask*(
   kstack.data[index - 2] = cast[uint64](ustack.bottom) # RSP
   kstack.data[index - 3] = cast[uint64](0x202) # RFLAGS
   kstack.data[index - 4] = cast[uint64](UserCodeSegmentSelector) # CS
-  kstack.data[index - 5] = cast[uint64](realEntryPoint) # RIP
+  kstack.data[index - 5] = cast[uint64](entryPoint) # RIP
 
   result.id = taskId
   result.space = uspace

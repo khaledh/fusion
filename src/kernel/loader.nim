@@ -25,7 +25,7 @@ type
     info: uint64
     addend: int64
 
-  RelaType = enum
+  RelaEntryType = enum
     Relative = 8
 
 proc applyRelocations*(image: ptr UncheckedArray[byte]): uint64 =
@@ -60,16 +60,14 @@ proc applyRelocations*(image: ptr UncheckedArray[byte]): uint64 =
   if relsize != relentsize * relcount:
     raise newException(Exception, "Invalid dynamic section. .rela.dyn size mismatch.")
 
+  # rela points to the first relocation entry
   let rela = cast[ptr UncheckedArray[RelaEntry]](cast[uint64](image) + reloffset.uint64)
   # debugln &"rela = {cast[uint64](rela):#x}"
-
-  let relo = cast[uint64](cast[uint64](image) + (i + 1).uint64 * sizeof(DynamicEntry).uint64)
-  # debugln &".data.rel.ro = {relo:#x}"
 
   for i in 0 ..< relcount:
     let relent = rela[i]
     # debugln &"relent = (.offset = {relent.offset:#x}, .info = {relent.info:#x}, .addend = {relent.addend:#x})"
-    if relent.info != RelaType.Relative.uint64:
+    if relent.info != RelaEntryType.Relative.uint64:
       raise newException(Exception, "Only relative relocations are supported.")
     # apply relocation
     let target = cast[ptr uint64](cast[uint64](image) + relent.offset)
