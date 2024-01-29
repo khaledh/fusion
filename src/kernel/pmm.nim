@@ -232,3 +232,19 @@ proc pmFree*(paddr: PhysAddr, nframes: uint64) =
       prev.next = newnode
     else:
       head = newnode
+
+proc printFreeRegions*() =
+  debug &"""   {"Start":>16}"""
+  debug &"""   {"Start (KB)":>12}"""
+  debug &"""   {"Size (KB)":>11}"""
+  debug &"""   {"#Pages":>9}"""
+  debugln ""
+  var totalFreePages: uint64 = 0
+  for (start, nframes) in pmFreeRegions():
+    debug &"   {cast[uint64](start):>#16x}"
+    debug &"   {cast[uint64](start) div 1024:>#12}"
+    debug &"   {nframes * 4:>#11}"
+    debug &"   {nframes:>#9}"
+    debugln ""
+    totalFreePages += nframes
+  debugln &"kernel: Total free: {totalFreePages * 4} KiB ({totalFreePages * 4 div 1024} MiB)"

@@ -1,4 +1,4 @@
-import std/[options, strformat]
+import std/[algorithm, options, strformat]
 
 import common/pagetables
 import pmm
@@ -220,6 +220,9 @@ proc vmalloc*(
   # add the region to the address space
   space.regions.add VMRegion(start: virtAddr, npages: pageCount)
 
+  # sort the regions by start address
+  space.regions = space.regions.sortedByIt(it.start)
+
   result = some virtAddr
 
 
@@ -285,3 +288,17 @@ proc dumpPageTable*(pml4: ptr PML4Table) =
                   if first and ptIndex < 511 and pt.entries[ptIndex+1].present == 1:
                     debugln "        ..."
                     first = false
+
+# proc printVMRegions*(memoryMap: MemoryMap) =
+#   debug &"""   {"Start":>20}"""
+#   debug &"""   {"Type":12}"""
+#   debug &"""   {"VM Size (KB)":>12}"""
+#   debug &"""   {"#Pages":>9}"""
+#   debugln ""
+#   for i in 0 ..< memoryMap.len:
+#     let entry = memoryMap.entries[i]
+#     debug &"   {entry.start:>#20x}"
+#     debug &"   {entry.type:#12}"
+#     debug &"   {entry.nframes * 4:>#12}"
+#     debug &"   {entry.nframes:>#9}"
+#     debugln ""

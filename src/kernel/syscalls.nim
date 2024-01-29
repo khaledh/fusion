@@ -3,6 +3,7 @@ import std/strformat
 import debugcon
 import cpu
 import gdt
+import sched
 import tasks
 
 type
@@ -64,23 +65,28 @@ proc syscallEntry() {.asmNoStackFrame.} =
   """
 
 proc syscall(args: ptr SyscallArgs): uint64 {.exportc.} =
-  debugln &"syscall: num={args.num}"
+  # debugln &"syscall: num={args.num}"
   if args.num > syscallTable.high.uint64 or syscallTable[args.num] == nil:
     return InvalidSyscall.uint64
   result = syscallTable[args.num](args)
 
+###############################################################################
+# Syscalls
+###############################################################################
+
+###
+# Exit
+###
 proc exit*(args: ptr SyscallArgs): uint64 {.cdecl.} =
   debugln &"syscall: exit: code={args.arg1}"
-  asm """
-    cli
-    hlt
-  """
+  removeCurrent()
+  schedule()
 
+###
+# Print
+###
 proc print*(args: ptr SyscallArgs): uint64 {.cdecl.} =
-  debugln &"syscall: print (arg1={args.arg1:#x})"
-  debugln &"syscall: print: arg1[0]={cast[ptr uint64](args.arg1)[]}"
-  debugln &"syscall: print: arg1[1]={cast[ptr uint64](args.arg1 + 8)[]:#x}"
-
+  debugln &"syscall: print"
   if args.arg1 > UserAddrSpaceEnd:
     debugln "syscall: print: Invalid pointer"
     return InvalidArg.uint64
@@ -90,11 +96,19 @@ proc print*(args: ptr SyscallArgs): uint64 {.cdecl.} =
 
   result = 0
 
+###
+# Yield
+###
+proc yld*(args: ptr SyscallArgs): uint64 {.cdecl.} =
+  debugln &"syscall: yield"
+  schedule()
+
 
 proc syscallInit*() =
   # set up syscall table
   syscallTable[1] = exit
   syscallTable[2] = print
+  syscallTable[3] = yld
 
   # enable syscall feature
   writeMSR(IA32_EFER, readMSR(IA32_EFER) or 1)  # Bit 0: SYSCALL Enable

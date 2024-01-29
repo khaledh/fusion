@@ -8,6 +8,8 @@ import gdt
 import pmm
 import vmm
 
+{.experimental: "codeReordering".}
+
 type
   TaskStack* = object
     data*: ptr UncheckedArray[uint64]
@@ -15,15 +17,21 @@ type
     bottom*: uint64
 
   Task* = ref object
-    id*: uint64
+    rsp*: uint64
     space*: VMAddressSpace
+    id*: uint64
     ustack*: TaskStack
     kstack*: TaskStack
-    rsp*: uint64
+    state*: TaskState
+  
+  TaskState* = enum
+    New
+    Ready
+    Running
+    Terminated
 
 var
   nextId: uint64 = 0
-  currentTask* {.exportc.}: Task
 
 proc createStack*(space: var VMAddressSpace, npages: uint64, mode: PageMode): TaskStack =
   let stackPtr = vmalloc(space, npages, paReadWrite, mode)
@@ -33,8 +41,13 @@ proc createStack*(space: var VMAddressSpace, npages: uint64, mode: PageMode): Ta
   result.size = npages * PageSize
   result.bottom = cast[uint64](result.data) + result.size
 
+template orRaise[T](opt: Option[T], exc: ref Exception): T =
+  if opt.isSome:
+    opt.get
+  else:
+    raise exc
+
 proc createTask*(
-  imageVirtAddr: VirtAddr,
   imagePhysAddr: PhysAddr,
   imagePageCount: uint64,
 ): Task =
@@ -47,6 +60,11 @@ proc createTask*(
     minAddress: UserSpaceMinAddress,
     maxAddress: UserSpaceMaxAddress,
     pml4: cast[ptr PML4Table](new PML4Table)
+  )
+
+  # allocate user image vm region
+  let imageVirtAddr = vmalloc(uspace, imagePageCount, paReadWrite, pmUser).orRaise(
+    newException(Exception, "tasks: Failed to allocate VM region for user image")
   )
 
   # map user image
@@ -81,7 +99,7 @@ proc createTask*(
   let ustack = createStack(uspace, 1, pmUser)
   let kstack = createStack(kspace, 1, pmSupervisor)
 
-  # create interrupt stack frame on the kernel stack
+  # create interrupt stack frame
   var index = kstack.size div 8
   kstack.data[index - 1] = cast[uint64](DataSegmentSelector) # SS
   kstack.data[index - 2] = cast[uint64](ustack.bottom) # RSP
@@ -94,16 +112,4 @@ proc createTask*(
   result.ustack = ustack
   result.kstack = kstack
   result.rsp = cast[uint64](kstack.data[index - 5].addr)
-
-proc switchTo*(task: var Task) {.noreturn.} =
-  currentTask = task
-  tss.rsp0 = task.kstack.bottom
-  let rsp = task.rsp
-  setActivePML4(task.space.pml4)
-  asm """
-    mov rsp, %0
-    mov rbp, 0
-    iretq
-    :
-    : "r"(`rsp`)
-  """
+  result.state = TaskState.New

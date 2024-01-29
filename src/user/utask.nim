@@ -15,10 +15,15 @@ proc UserMain*() {.exportc.} =
     mov rsi, %0
     syscall
 
+    # call yield
+    mov rdi, 3
+    syscall
+
     # call exit
     mov rdi, 1
     mov rsi, 0
     syscall
+
     :
     : "r"(`pmsg`)
     : "rdi", "rsi"

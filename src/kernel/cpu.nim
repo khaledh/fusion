@@ -28,3 +28,11 @@ proc writeMSR*(ecx: uint32, value: uint64) =
     :
     : "c"(`ecx`), "a"(`eax`), "d"(`edx`)
   """
+
+proc halt*() =
+  asm """
+  .loop:
+    cli
+    hlt
+    jmp .loop
+  """

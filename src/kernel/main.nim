@@ -5,47 +5,14 @@ import debugcon
 import idt
 import gdt
 import pmm
+import sched
 import syscalls
 import tasks
 import vmm
 
-const
-  UserImageVirtualBase = 0x80000000
-  UserStackVirtualBase = 0x90000000
-
 proc NimMain() {.importc.}
 proc KernelMainInner(bootInfo: ptr BootInfo)
 proc unhandledException*(e: ref Exception)
-
-proc printFreeRegions() =
-  debug &"""   {"Start":>16}"""
-  debug &"""   {"Start (KB)":>12}"""
-  debug &"""   {"Size (KB)":>11}"""
-  debug &"""   {"#Pages":>9}"""
-  debugln ""
-  var totalFreePages: uint64 = 0
-  for (start, nframes) in pmFreeRegions():
-    debug &"   {cast[uint64](start):>#16x}"
-    debug &"   {cast[uint64](start) div 1024:>#12}"
-    debug &"   {nframes * 4:>#11}"
-    debug &"   {nframes:>#9}"
-    debugln ""
-    totalFreePages += nframes
-  debugln &"kernel: Total free: {totalFreePages * 4} KiB ({totalFreePages * 4 div 1024} MiB)"
-
-proc printVMRegions(memoryMap: MemoryMap) =
-  debug &"""   {"Start":>20}"""
-  debug &"""   {"Type":12}"""
-  debug &"""   {"VM Size (KB)":>12}"""
-  debug &"""   {"#Pages":>9}"""
-  debugln ""
-  for i in 0 ..< memoryMap.len:
-    let entry = memoryMap.entries[i]
-    debug &"   {entry.start:>#20x}"
-    debug &"   {entry.type:#12}"
-    debug &"   {entry.nframes * 4:>#12}"
-    debug &"   {entry.nframes:>#9}"
-    debugln ""
 
 proc KernelMain(bootInfo: ptr BootInfo) {.exportc.} =
   NimMain()
@@ -61,22 +28,15 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   debugln ""
   debugln "kernel: Fusion Kernel"
 
-  debug "kernel: Initializing physical memory manager "
+  debug "kernel: Initializing PMM "
   pmInit(bootInfo.physicalMemoryVirtualBase, bootInfo.physicalMemoryMap)
   debugln "[success]"
 
-  debug "kernel: Initializing virtual memory manager "
+  debug "kernel: Initializing VMM "
   vmInit(bootInfo.physicalMemoryVirtualBase, pmm.pmAlloc)
   vmAddRegion(kspace, bootInfo.kernelImageVirtualBase.VirtAddr, bootInfo.kernelImagePages)
   vmAddRegion(kspace, bootInfo.kernelStackVirtualBase.VirtAddr, bootInfo.kernelStackPages)
   debugln "[success]"
-
-
-  debugln "kernel: Physical memory free regions "
-  printFreeRegions()
-
-  debugln "kernel: Virtual memory regions "
-  printVMRegions(bootInfo.virtualMemoryMap)
 
   debug "kernel: Initializing GDT "
   gdtInit()
@@ -90,15 +50,22 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   syscallInit()
   debugln "[success]"
 
-  debugln "kernel: Creating user task"
-  var task = createTask(
-    imageVirtAddr = UserImageVirtualBase.VirtAddr,
+  debugln "kernel: Creating user tasks"
+  var task1 = createTask(
+    imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
+    imagePageCount = bootInfo.userImagePages,
+  )
+  var task2 = createTask(
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
     imagePageCount = bootInfo.userImagePages,
   )
 
-  debugln "kernel: Switching to user mode"
-  switchTo(task)
+  debugln "kernel: Adding tasks to scheduler"
+  sched.addTask(task1)
+  sched.addTask(task2)
+
+  debugln "kernel: Starting scheduler"
+  sched.schedule()
 
 proc unhandledException*(e: ref Exception) =
   debugln ""
