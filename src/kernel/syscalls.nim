@@ -79,14 +79,16 @@ proc syscall(args: ptr SyscallArgs): uint64 {.exportc.} =
 ###
 proc exit*(args: ptr SyscallArgs): uint64 {.cdecl.} =
   debugln &"syscall: exit: code={args.arg1}"
-  removeCurrent()
+  terminateTask(getCurrentTask())
   schedule()
 
 ###
 # Print
 ###
 proc print*(args: ptr SyscallArgs): uint64 {.cdecl.} =
-  debugln &"syscall: print"
+  debugln &"syscall: print (arg1={args.arg1:#x})"
+  debugln &"syscall: print: arg1.len = {cast[ptr uint64](args.arg1)[]}"
+  debugln &"syscall: print: arg1.p   = {cast[ptr uint64](args.arg1 + 8)[]:#x}"
   if args.arg1 > UserAddrSpaceEnd:
     debugln "syscall: print: Invalid pointer"
     return InvalidArg.uint64
@@ -99,7 +101,7 @@ proc print*(args: ptr SyscallArgs): uint64 {.cdecl.} =
 ###
 # Yield
 ###
-proc yld*(args: ptr SyscallArgs): uint64 {.cdecl.} =
+proc `yield`*(args: ptr SyscallArgs): uint64 {.cdecl.} =
   debugln &"syscall: yield"
   schedule()
 
@@ -108,7 +110,7 @@ proc syscallInit*() =
   # set up syscall table
   syscallTable[1] = exit
   syscallTable[2] = print
-  syscallTable[3] = yld
+  syscallTable[3] = `yield`
 
   # enable syscall feature
   writeMSR(IA32_EFER, readMSR(IA32_EFER) or 1)  # Bit 0: SYSCALL Enable

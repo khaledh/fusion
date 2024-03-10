@@ -1,7 +1,8 @@
 {
   "nim.project": [
     "src/kernel/main.nim",
-    "src/boot/bootx64.nim"
+    "src/boot/bootx64.nim",
+    "src/user/utask.nim",
   ],
   "nim.projectMapping": [
     {
@@ -14,7 +15,7 @@
     },
     {
         "projectFile": "src/user/utask.nim",
-        "fileRegex": "src/user/.*\\.nim",
+        "fileRegex": "src/(user|syslib)/.*\\.nim",
     },
-  ]
+  ],
 }

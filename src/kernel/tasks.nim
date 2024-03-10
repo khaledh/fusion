@@ -113,3 +113,9 @@ proc createTask*(
   result.kstack = kstack
   result.rsp = cast[uint64](kstack.data[index - 5].addr)
   result.state = TaskState.New
+
+
+proc terminateTask*(task: var Task) =
+  # vmfree(task.space, task.ustack.data, task.ustack.size div PageSize)
+  # vmfree(task.space, task.kstack.data, task.kstack.size div PageSize)
+  task.state = TaskState.Terminated

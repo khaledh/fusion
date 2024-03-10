@@ -8,40 +8,34 @@ import tasks
 {.experimental: "codeReordering".}
 
 var
-  taskQ = initDeque[Task]()
-  currentTask* {.exportc.}: Task
+  readyTasks = initDeque[Task]()
+  currentTask {.exportc.}: Task
+
+proc getCurrentTask*(): var Task = currentTask
 
 proc addTask*(t: Task) =
-  taskQ.addLast(t)
-
-proc removeCurrent*() =
-  # TODO: free resources
-  currentTask = nil
-
-  if taskQ.len == 0:
-    debugln &"sched: no tasks left"
-    halt()
-
-  schedule()
+  readyTasks.addLast(t)
 
 proc schedule*() =
-  if taskQ.len == 0:
-    # no other tasks, just keep running the current one
-    return
+  if readyTasks.len == 0:
+    if currentTask.isNil or currentTask.state == Terminated:
+      debugln &"sched: no tasks to run, halting"
+      halt()
+    else:
+      # no ready tasks, keep running the current task
+      return
 
-  if not currentTask.isNil:
+  if not (currentTask.isNil or currentTask.state == Terminated):
     # put the current task back into the queue
     currentTask.state = TaskState.Ready
-    taskQ.addLast(currentTask)
+    readyTasks.addLast(currentTask)
 
   # switch to the first task in the queue
-  var nextTask = taskQ.popFirst()
+  var nextTask = readyTasks.popFirst()
 
   if currentTask.isNil:
     debugln &"sched: switching -> {nextTask.id}"
   else:
     debugln &"sched: switching {currentTask.id} -> {nextTask.id}"
   
-  var prevTask = currentTask
-  currentTask = nextTask
-  switchTask(prevTask, currentTask)
+  switchTo(nextTask)

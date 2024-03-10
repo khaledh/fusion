@@ -1,4 +1,5 @@
 import common/[libc, malloc]
+import syslib/[io, os]
 
 proc NimMain() {.importc.}
 
@@ -9,22 +10,6 @@ let
 proc UserMain*() {.exportc.} =
   NimMain()
 
-  asm """
-    # call print
-    mov rdi, 2
-    mov rsi, %0
-    syscall
-
-    # call yield
-    mov rdi, 3
-    syscall
-
-    # call exit
-    mov rdi, 1
-    mov rsi, 0
-    syscall
-
-    :
-    : "r"(`pmsg`)
-    : "rdi", "rsi"
-  """
+  print(pmsg)
+  yld()
+  exit(0)
