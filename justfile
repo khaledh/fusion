@@ -34,7 +34,7 @@ run *QEMU_ARGS: bootloader kernel user
   cp build/user/{{user_out}} {{disk_image_dir}}/efi/fusion/{{user_out}}
 
   @echo ""
-  /Users/khaledhammouda/src/github.com/qemu/qemu/build/qemu-system-x86_64 \
+  qemu-system-x86_64 \
     -drive if=pflash,format=raw,file={{ovmf_code}},readonly=on \
     -drive if=pflash,format=raw,file={{ovmf_vars}} \
     -drive format=raw,file=fat:rw:{{disk_image_dir}} \

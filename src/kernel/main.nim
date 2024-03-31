@@ -55,19 +55,19 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
     imagePageCount = bootInfo.userImagePages,
   )
-  # var task2 = createTask(
-  #   imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
-  #   imagePageCount = bootInfo.userImagePages,
-  # )
-  # var task3 = createTask(
-  #   imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
-  #   imagePageCount = bootInfo.userImagePages,
-  # )
+  var task2 = createTask(
+    imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
+    imagePageCount = bootInfo.userImagePages,
+  )
+  var task3 = createTask(
+    imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
+    imagePageCount = bootInfo.userImagePages,
+  )
 
   debugln "kernel: Adding tasks to scheduler"
   sched.addTask(task1)
-  # sched.addTask(task2)
-  # sched.addTask(task3)
+  sched.addTask(task2)
+  sched.addTask(task3)
 
   debugln "kernel: Starting scheduler"
   sched.schedule()
