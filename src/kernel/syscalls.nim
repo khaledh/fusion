@@ -86,9 +86,9 @@ proc exit*(args: ptr SyscallArgs): uint64 {.cdecl.} =
 # Print
 ###
 proc print*(args: ptr SyscallArgs): uint64 {.cdecl.} =
-  debugln &"syscall: print (arg1={args.arg1:#x})"
-  debugln &"syscall: print: arg1.len = {cast[ptr uint64](args.arg1)[]}"
-  debugln &"syscall: print: arg1.p   = {cast[ptr uint64](args.arg1 + 8)[]:#x}"
+  # debugln &"syscall: print (arg1={args.arg1:#x})"
+  # debugln &"syscall: print: arg1.len = {cast[ptr uint64](args.arg1)[]}"
+  # debugln &"syscall: print: arg1.p   = {cast[ptr uint64](args.arg1 + 8)[]:#x}"
   if args.arg1 > UserAddrSpaceEnd:
     debugln "syscall: print: Invalid pointer"
     return InvalidArg.uint64

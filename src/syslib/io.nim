@@ -1,4 +1,4 @@
-include syscalldefs
+include syscalldef
 
 proc print*(pstr: ptr string) =
   asm """
