@@ -11,14 +11,13 @@ type
   PhysAlloc* = proc (nframes: uint64): Option[PhysAddr]
 
   VMRegion* = object
-    start: VirtAddr
-    npages: uint64
+    start*: VirtAddr
+    npages*: uint64
 
   VMAddressSpace* = object
     minAddress*: VirtAddr
     maxAddress*: VirtAddr
     regions*: seq[VMRegion]
-    pml4*: ptr PML4Table
 
   # VMAllocType* = enum
   #   AnyAddress
@@ -34,7 +33,17 @@ const
 var
   physicalMemoryVirtualBase: uint64
   pmalloc: PhysAlloc
-  kspace*: VMAddressSpace
+  kspace* = VMAddressSpace(
+    minAddress: KernelSpaceMinAddress,
+    maxAddress: KernelSpaceMaxAddress,
+    regions: @[],
+  )
+  uspace* = VMAddressSpace(
+    minAddress: UserSpaceMinAddress,
+    maxAddress: UserSpaceMaxAddress,
+    regions: @[],
+  )
+
 
 template `+!`*(p: VirtAddr, offset: uint64): VirtAddr =
   VirtAddr(cast[uint64](p) + offset)
@@ -49,12 +58,6 @@ proc `<=`*(a: VirtAddr, b: VirtAddr): bool =  cast[uint64](a) <= cast[uint64](b)
 proc vmInit*(physMemoryVirtualBase: uint64, physAlloc: PhysAlloc) =
   physicalMemoryVirtualBase = physMemoryVirtualBase
   pmalloc = physAlloc
-  kspace = VMAddressSpace(
-    minAddress: KernelSpaceMinAddress,
-    maxAddress: KernelSpaceMaxAddress,
-    regions: @[],
-    pml4: getActivePML4(),
-  )
 
 proc vmAddRegion*(space: var VMAddressSpace, start: VirtAddr, npages: uint64) =
   space.regions.add VMRegion(start: start, npages: npages)
@@ -202,10 +205,11 @@ proc identityMapRegion*(
 
 proc vmalloc*(
   space: var VMAddressSpace,
+  pml4: ptr PML4Table,
   pageCount: uint64,
   pageAccess: PageAccess,
   pageMode: PageMode,
-): Option[VirtAddr] =
+): Option[VMRegion] =
   # find a free region
   var virtAddr: VirtAddr = space.minAddress
   for region in space.regions:
@@ -215,15 +219,14 @@ proc vmalloc*(
 
   # allocate physical memory and map it
   let  physAddr = pmalloc(pageCount).get # TODO: handle allocation failure
-  mapRegion(space.pml4, virtAddr, physAddr, pageCount, pageAccess, pageMode)
+  mapRegion(pml4, virtAddr, physAddr, pageCount, pageAccess, pageMode)
 
-  # add the region to the address space
-  space.regions.add VMRegion(start: virtAddr, npages: pageCount)
-
-  # sort the regions by start address
+  # add the region to the address space, and sort the regions by start address
+  let vmRegion = VMRegion(start: virtAddr, npages: pageCount)
+  space.regions.add(vmRegion)
   space.regions = space.regions.sortedByIt(it.start)
 
-  result = some virtAddr
+  result = some vmRegion
 
 
 ####################################################################################################

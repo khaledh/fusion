@@ -13,7 +13,7 @@ var
 
 proc switchTo*(next: var Task) =
   tss.rsp0 = next.kstack.bottom
-  setActivePML4(next.space.pml4)
+  setActivePML4(next.pml4)
 
   if not (currentTask.isNil or currentTask.state == TaskState.Terminated):
     pushRegs()

@@ -18,11 +18,13 @@ type
 
   Task* = ref object
     rsp*: uint64
-    space*: VMAddressSpace
     id*: uint64
+    vmRegions*: seq[VMRegion]
+    pml4*: ptr PML4Table
     ustack*: TaskStack
     kstack*: TaskStack
     state*: TaskState
+    vaddr*: VirtAddr
   
   TaskState* = enum
     New
@@ -33,11 +35,13 @@ type
 var
   nextId: uint64 = 0
 
-proc createStack*(space: var VMAddressSpace, npages: uint64, mode: PageMode): TaskStack =
-  let stackPtr = vmalloc(space, npages, paReadWrite, mode)
-  if stackPtr.isNone:
+proc createStack*(task: var Task, space: var VMAddressSpace, npages: uint64, mode: PageMode): TaskStack =
+  let stackRegionOpt = vmalloc(space, task.pml4, npages, paReadWrite, mode)
+  if stackRegionOpt.isNone:
     raise newException(Exception, "tasks: Failed to allocate stack")
-  result.data = cast[ptr UncheckedArray[uint64]](stackPtr.get)
+  let stackRegion = stackRegionOpt.get
+  task.vmRegions.add(stackRegion)
+  result.data = cast[ptr UncheckedArray[uint64]](stackRegion.start)
   result.size = npages * PageSize
   result.bottom = cast[uint64](result.data) + result.size
 
@@ -56,21 +60,21 @@ proc createTask*(
   let taskId = nextId
   inc nextId
 
-  var uspace = VMAddressSpace(
-    minAddress: UserSpaceMinAddress,
-    maxAddress: UserSpaceMaxAddress,
-    pml4: cast[ptr PML4Table](new PML4Table)
-  )
+  result.vmRegions = @[]
+  result.pml4 = cast[ptr PML4Table](new PML4Table)
 
   # allocate user image vm region
-  let imageVirtAddr = vmalloc(uspace, imagePageCount, paReadWrite, pmUser).orRaise(
+  let imageRegion = vmalloc(uspace, result.pml4, imagePageCount, paReadWrite, pmUser).orRaise(
     newException(Exception, "tasks: Failed to allocate VM region for user image")
   )
+  result.vmRegions.add(imageRegion)
 
-  # map user image
+  result.vaddr = imageRegion.start
+  debugln &"kernel: User image virt addr: {result.vaddr.uint64:#x}"
+
   mapRegion(
-    pml4 = uspace.pml4,
-    virtAddr = imageVirtAddr,
+    pml4 = result.pml4,
+    virtAddr = result.vaddr,
     physAddr = imagePhysAddr,
     pageCount = imagePageCount,
     pageAccess = paReadWrite,
@@ -78,26 +82,28 @@ proc createTask*(
   )
 
   # temporarily map the user image in kernel space
+  var kpml4 = getActivePML4()
   mapRegion(
-    pml4 = kspace.pml4,
-    virtAddr = imageVirtAddr,
+    pml4 = kpml4,
+    virtAddr = result.vaddr,
     physAddr = imagePhysAddr,
     pageCount = imagePageCount,
     pageAccess = paReadWrite,
     pageMode = pmSupervisor,
   )
+  return
+
   # apply relocations to user image
   debugln "kernel: Applying relocations to user image"
-  let entryPoint = applyRelocations(cast[ptr UncheckedArray[byte]](imageVirtAddr))
+  let entryPoint = applyRelocations(cast[ptr UncheckedArray[byte]](result.vaddr))
 
   # map kernel space
-  var kpml4 = getActivePML4()
   for i in 256 ..< 512:
-    uspace.pml4.entries[i] = kpml4.entries[i]
+    result.pml4.entries[i] = kpml4.entries[i]
 
   # create user and kernel stacks
-  let ustack = createStack(uspace, 1, pmUser)
-  let kstack = createStack(kspace, 1, pmSupervisor)
+  let ustack = createStack(result, uspace, 1, pmUser)
+  let kstack = createStack(result, kspace, 1, pmSupervisor)
 
   # create interrupt stack frame
   var index = kstack.size div 8
@@ -108,7 +114,6 @@ proc createTask*(
   kstack.data[index - 5] = cast[uint64](entryPoint) # RIP
 
   result.id = taskId
-  result.space = uspace
   result.ustack = ustack
   result.kstack = kstack
   result.rsp = cast[uint64](kstack.data[index - 5].addr)

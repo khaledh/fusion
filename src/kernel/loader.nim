@@ -8,6 +8,8 @@ import debugcon
 #        x       .data.rel.ro
 #        y       .rela.dyn
 #        z       .text
+#        w       .rodata
+#        v       .data
 
 type
   DynamicEntry {.packed.} = object

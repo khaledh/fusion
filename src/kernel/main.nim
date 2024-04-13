@@ -1,7 +1,9 @@
 import std/strformat
 
 import common/[bootinfo, libc, malloc]
+import cpu
 import debugcon
+import elf
 import idt
 import gdt
 import pmm
@@ -55,19 +57,23 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
     imagePageCount = bootInfo.userImagePages,
   )
-  var task2 = createTask(
-    imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
-    imagePageCount = bootInfo.userImagePages,
-  )
-  var task3 = createTask(
-    imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
-    imagePageCount = bootInfo.userImagePages,
-  )
+  debugln &"kernel: Task loadeed at {task1.vaddr.uint64:#x}"
+
+  elf.load(cast[ptr UncheckedArray[byte]](task1.vaddr))
+  halt()
+  # var task2 = createTask(
+  #   imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
+  #   imagePageCount = bootInfo.userImagePages,
+  # )
+  # var task3 = createTask(
+  #   imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
+  #   imagePageCount = bootInfo.userImagePages,
+  # )
 
   debugln "kernel: Adding tasks to scheduler"
   sched.addTask(task1)
-  sched.addTask(task2)
-  sched.addTask(task3)
+  # sched.addTask(task2)
+  # sched.addTask(task3)
 
   debugln "kernel: Starting scheduler"
   sched.schedule()
