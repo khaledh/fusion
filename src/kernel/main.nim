@@ -59,8 +59,6 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   )
   debugln &"kernel: Task loadeed at {task1.vaddr.uint64:#x}"
 
-  elf.load(cast[ptr UncheckedArray[byte]](task1.vaddr))
-  halt()
   # var task2 = createTask(
   #   imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
   #   imagePageCount = bootInfo.userImagePages,

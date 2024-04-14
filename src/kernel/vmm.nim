@@ -203,13 +203,7 @@ proc identityMapRegion*(
 # Allocate a range of virtual addresses
 ####################################################################################################
 
-proc vmalloc*(
-  space: var VMAddressSpace,
-  pml4: ptr PML4Table,
-  pageCount: uint64,
-  pageAccess: PageAccess,
-  pageMode: PageMode,
-): Option[VMRegion] =
+proc vmalloc*(space: var VMAddressSpace, pageCount: uint64): Option[VMRegion] =
   # find a free region
   var virtAddr: VirtAddr = space.minAddress
   for region in space.regions:
@@ -217,16 +211,16 @@ proc vmalloc*(
       break
     virtAddr = region.start +! region.npages * PageSize
 
-  # allocate physical memory and map it
-  let  physAddr = pmalloc(pageCount).get # TODO: handle allocation failure
-  mapRegion(pml4, virtAddr, physAddr, pageCount, pageAccess, pageMode)
-
   # add the region to the address space, and sort the regions by start address
   let vmRegion = VMRegion(start: virtAddr, npages: pageCount)
   space.regions.add(vmRegion)
   space.regions = space.regions.sortedByIt(it.start)
 
   result = some vmRegion
+
+proc vmmap*(region: VMRegion, pml4: ptr PML4Table, pageAccess: PageAccess, pageMode: PageMode) =
+  let  physAddr = pmalloc(region.npages).get # TODO: handle allocation failure
+  mapRegion(pml4, region.start, physAddr, region.npages, pageAccess, pageMode)
 
 
 ####################################################################################################

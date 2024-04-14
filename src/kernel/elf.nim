@@ -2,9 +2,13 @@
 
 # This is a simple ELF loader that can load ELF binaries. It is written in Nim.
 
+import std/options
 import std/strformat
 
+import common/pagetables
 import debugcon
+import vmm
+import pmm
 
 type
   ElfHeader = object
@@ -50,8 +54,8 @@ type
     RiscV = (0xf3, "RISC-V")
 
   ElfProgramHeader {.packed.} = object
-    `type`: uint32
-    flags: uint32
+    `type`: ElfProgramHeaderType
+    flags: uint32  # can't use ElfProgramHeaderFlags here because sets are limited to 16-bits
     offset: uint64
     vaddr: uint64
     paddr: uint64
@@ -71,6 +75,12 @@ type
     GnuEhFrame = (0x6474e550, "GNU_EH_FRAME")
     GnuStack = (0x6474e551, "GNU_STACK")
     GnuRelro = (0x6474e552, "GNU_RELRO")
+  
+  ElfProgramHeaderFlag {.size: sizeof(uint32).} = enum
+    Executable = (1'u32, "Executable")
+    Writable = (2, "Writable")
+    Readable = (4, "Readable")
+  ElfProgramHeaderFlags = set[ElfProgramHeaderFlag]
 
   ElfSectionHeader {.packed.} = object
     nameoffset: uint32
@@ -110,7 +120,13 @@ type
     GnuVerNeed = (0x6ffffffe, "GNU_VERNEED")
     GnuVerSym = (0x6fffffff, "GNU_VERSYM")
 
-proc load*(image: ptr UncheckedArray[byte]) =
+  LoadedElfImage = object
+    vmRegion: VMRegion
+    entryPoint: pointer
+
+proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
+  let image = p2v(imagePhysAddr)
+
   let header = cast[ptr ElfHeader](image)
   if header.magic != [0x7f.char, 'E', 'L', 'F']:
     raise newException(Exception, "Not an ELF file")
@@ -135,7 +151,7 @@ proc load*(image: ptr UncheckedArray[byte]) =
   let shstrndx = header.shstrndx
   let shstrtab = cast[ptr ElfSectionHeader](cast[uint64](image) + shoff + shentsize * shstrndx)
   let shstrtabdata = cast[ptr cstring](cast[uint64](image) + shstrtab.offset)
-  for i in 0.uint16..<shnum:
+  for i in 0.uint16 ..< shnum:
     let sh = cast[ptr ElfSectionHeader](cast[uint64](image) + shoff + shentsize * i)
     let name = cast[cstring](cast[uint64](shstrtabdata) + sh.nameoffset)
     debugln &"Section {i}: {name}"
@@ -143,7 +159,58 @@ proc load*(image: ptr UncheckedArray[byte]) =
   let phoffset = header.phoff
   let phentsize = header.phentsize
   let phnum = header.phnum
-  for i in 0.uint16..<phnum:
-    let ph = cast[ptr ElfProgramHeader](cast[uint64](image) + phoffset + phentsize * i)
-    debugln &"Program header {i}: {cast[ElfProgramHeaderType](ph.type)}"
 
+  var maxVAddr: uint64 = 0
+  var minVAddr: uint64 = uint64.high
+  for i in 0.uint16 ..< phnum:
+    let ph = cast[ptr ElfProgramHeader](cast[uint64](image) + phoffset + phentsize * i)
+    debug &"Program header {i}: {ph.type}"
+    debug &"  Flags: {ph.flags:#b}"
+    debug &"  VAddr: {ph.vaddr:#x}"
+    debug &"  File size: {ph.filesz}"
+    debugln &"  Mem size: {ph.memsz}"
+
+    if ph.type == ElfProgramHeaderType.Load:
+      if ph.vaddr < minVAddr:
+        minVAddr = ph.vaddr
+      if ph.vaddr + ph.memsz > maxVAddr:
+        maxVAddr = ph.vaddr + ph.memsz
+
+  if minVAddr != 0:
+    raise newException(Exception, "Expecting a PIE binary with a base address of 0")
+
+  var totalVMSize = maxVAddr
+  debugln &"Total VM size: {totalVMSize}"
+
+  let pageCount = (totalVMSize + PageSize - 1) div PageSize
+  let vmRegionOpt = vmalloc(uspace, pageCount)
+  if vmRegionOpt.isNone:
+    raise newException(Exception, "Failed to allocate memory")
+  let vmRegion = vmRegionOpt.get
+  debugln &"Allocated {vmRegion.npages} pages at {vmRegion.start.uint64:#x}"
+
+  # map the allocated memory into the page tables
+  vmmap(vmRegion, pml4, paReadWrite, pmUser)
+
+  # copy the program segments
+
+  # temporarily map the user image in kernel space
+  var kpml4 = getActivePML4()
+  mapRegion(
+    pml4 = kpml4,
+    virtAddr = vmRegion.start,
+    physAddr = imagePhysAddr,
+    pageCount = pageCount,
+    pageAccess = paReadWrite,
+    pageMode = pmSupervisor,
+  )
+
+  for i in 0.uint16 ..< phnum:
+    let ph = cast[ptr ElfProgramHeader](cast[uint64](image) + phoffset + phentsize * i)
+    if ph.type == ElfProgramHeaderType.Load:
+      let dest = cast[pointer](vmRegion.start +! ph.vaddr)
+      let src = cast[pointer](cast[uint64](image) + ph.offset)
+      copyMem(dest, src, ph.filesz)
+
+  result.vmRegion = vmRegion
+  result.entryPoint = cast[pointer](vmRegion.start +! header.entry)

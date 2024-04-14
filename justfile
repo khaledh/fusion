@@ -33,6 +33,7 @@ run *QEMU_ARGS: bootloader kernel user
   cp build/kernel/{{kernel_out}} {{disk_image_dir}}/efi/fusion/{{kernel_out}}
   cp build/user/{{user_out}} {{disk_image_dir}}/efi/fusion/{{user_out}}
 
+  @git restore ovmf/OVMF_VARS.fd
   @echo ""
   qemu-system-x86_64 \
     -drive if=pflash,format=raw,file={{ovmf_code}},readonly=on \

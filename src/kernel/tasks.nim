@@ -2,7 +2,9 @@ import std/options
 import std/strformat
 
 import common/pagetables
+import cpu
 import debugcon
+import elf
 import loader
 import gdt
 import pmm
@@ -36,10 +38,11 @@ var
   nextId: uint64 = 0
 
 proc createStack*(task: var Task, space: var VMAddressSpace, npages: uint64, mode: PageMode): TaskStack =
-  let stackRegionOpt = vmalloc(space, task.pml4, npages, paReadWrite, mode)
+  let stackRegionOpt = vmalloc(space, npages)
   if stackRegionOpt.isNone:
     raise newException(Exception, "tasks: Failed to allocate stack")
   let stackRegion = stackRegionOpt.get
+  vmmap(stackRegion, task.pml4, paReadWrite, mode)
   task.vmRegions.add(stackRegion)
   result.data = cast[ptr UncheckedArray[uint64]](stackRegion.start)
   result.size = npages * PageSize
@@ -51,10 +54,7 @@ template orRaise[T](opt: Option[T], exc: ref Exception): T =
   else:
     raise exc
 
-proc createTask*(
-  imagePhysAddr: PhysAddr,
-  imagePageCount: uint64,
-): Task =
+proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   new(result)
 
   let taskId = nextId
@@ -64,9 +64,14 @@ proc createTask*(
   result.pml4 = cast[ptr PML4Table](new PML4Table)
 
   # allocate user image vm region
-  let imageRegion = vmalloc(uspace, result.pml4, imagePageCount, paReadWrite, pmUser).orRaise(
-    newException(Exception, "tasks: Failed to allocate VM region for user image")
-  )
+  # let imageRegion = vmalloc(uspace, imagePageCount).orRaise(
+  #   newException(Exception, "tasks: Failed to allocate VM region for user image")
+  # )
+  # vmmap(imageRegion, result.pml4, paReadWrite, pmUser)
+  let loadedImage = elf.load(imagePhysAddr, result.pml4)
+  let imageRegion = loadedImage.mapRegion
+  let entryPoint = loadedImage.entryPoint
+
   result.vmRegions.add(imageRegion)
 
   result.vaddr = imageRegion.start
@@ -91,11 +96,11 @@ proc createTask*(
     pageAccess = paReadWrite,
     pageMode = pmSupervisor,
   )
-  return
+  halt()
 
   # apply relocations to user image
   debugln "kernel: Applying relocations to user image"
-  let entryPoint = applyRelocations(cast[ptr UncheckedArray[byte]](result.vaddr))
+  applyRelocations(cast[ptr UncheckedArray[byte]](result.vaddr))
 
   # map kernel space
   for i in 256 ..< 512:
