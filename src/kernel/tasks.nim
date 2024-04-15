@@ -37,6 +37,13 @@ type
 var
   nextId: uint64 = 0
 
+
+template orRaise[T](opt: Option[T], exc: ref Exception): T =
+  if opt.isSome:
+    opt.get
+  else:
+    raise exc
+
 proc createStack*(task: var Task, space: var VMAddressSpace, npages: uint64, mode: PageMode): TaskStack =
   let stackRegionOpt = vmalloc(space, npages)
   if stackRegionOpt.isNone:
@@ -48,12 +55,6 @@ proc createStack*(task: var Task, space: var VMAddressSpace, npages: uint64, mod
   result.size = npages * PageSize
   result.bottom = cast[uint64](result.data) + result.size
 
-template orRaise[T](opt: Option[T], exc: ref Exception): T =
-  if opt.isSome:
-    opt.get
-  else:
-    raise exc
-
 proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   new(result)
 
@@ -63,50 +64,24 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   result.vmRegions = @[]
   result.pml4 = cast[ptr PML4Table](new PML4Table)
 
-  # allocate user image vm region
-  # let imageRegion = vmalloc(uspace, imagePageCount).orRaise(
-  #   newException(Exception, "tasks: Failed to allocate VM region for user image")
-  # )
-  # vmmap(imageRegion, result.pml4, paReadWrite, pmUser)
+  debugln &"kernel: Loading task from ELF image"
   let loadedImage = elf.load(imagePhysAddr, result.pml4)
-  let imageRegion = loadedImage.mapRegion
+  let imageRegion = loadedImage.vmRegion
   let entryPoint = loadedImage.entryPoint
 
   result.vmRegions.add(imageRegion)
 
   result.vaddr = imageRegion.start
-  debugln &"kernel: User image virt addr: {result.vaddr.uint64:#x}"
-
-  mapRegion(
-    pml4 = result.pml4,
-    virtAddr = result.vaddr,
-    physAddr = imagePhysAddr,
-    pageCount = imagePageCount,
-    pageAccess = paReadWrite,
-    pageMode = pmUser,
-  )
-
-  # temporarily map the user image in kernel space
-  var kpml4 = getActivePML4()
-  mapRegion(
-    pml4 = kpml4,
-    virtAddr = result.vaddr,
-    physAddr = imagePhysAddr,
-    pageCount = imagePageCount,
-    pageAccess = paReadWrite,
-    pageMode = pmSupervisor,
-  )
-  halt()
-
-  # apply relocations to user image
-  debugln "kernel: Applying relocations to user image"
-  applyRelocations(cast[ptr UncheckedArray[byte]](result.vaddr))
+  debugln &"kernel: Task loaded at: {result.vaddr.uint64:#x}"
 
   # map kernel space
+  debugln &"kernel: Mapping kernel space in task's page table"
+  var kpml4 = getActivePML4()
   for i in 256 ..< 512:
     result.pml4.entries[i] = kpml4.entries[i]
 
   # create user and kernel stacks
+  debugln &"kernel: Creating task stacks"
   let ustack = createStack(result, uspace, 1, pmUser)
   let kstack = createStack(result, kspace, 1, pmSupervisor)
 
@@ -123,6 +98,8 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   result.kstack = kstack
   result.rsp = cast[uint64](kstack.data[index - 5].addr)
   result.state = TaskState.New
+
+  debugln &"kernel: Task {taskId} created"
 
 
 proc terminateTask*(task: var Task) =

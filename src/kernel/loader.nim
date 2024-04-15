@@ -1,6 +1,7 @@
 import std/strformat
 
 import debugcon
+import vmm
 
 # Format of user binary image
 #   offset       section
@@ -30,10 +31,15 @@ type
   RelaEntryType = enum
     Relative = 8
 
-proc applyRelocations*(image: ptr UncheckedArray[byte]): uint64 =
+proc applyRelocations*(
+  image: ptr UncheckedArray[byte],
+  elfBase: VirtAddr,
+  dynOffset: uint64
+) =
+  # debugln &"applyRelo: image at {cast[uint64](image):#x}, dynOffset = {dynOffset:#x}"
   ## Apply relocations to the image. Return the entry point address.
   var
-    dyn = cast[ptr UncheckedArray[DynamicEntry]](image)
+    dyn = cast[ptr UncheckedArray[DynamicEntry]](elfBase.uint64 + dynOffset)
     reloffset = 0'u64
     relsize = 0'u64
     relentsize = 0'u64
@@ -44,13 +50,17 @@ proc applyRelocations*(image: ptr UncheckedArray[byte]): uint64 =
   while dyn[i].tag != 0:
     case dyn[i].tag
     of DynmaicEntryType.Rela.uint64:
-      reloffset = dyn[i].value
+      reloffset = dynOffset + dyn[i].value
+      # debugln &"reloffset = {reloffset:#x}"
     of DynmaicEntryType.RelaSize.uint64:
       relsize = dyn[i].value
+      # debugln &"relsize = {relsize:#x}"
     of DynmaicEntryType.RelaEntSize.uint64:
       relentsize = dyn[i].value
+      # debugln &"relentsize = {relentsize:#x}"
     of DynmaicEntryType.RelaCount.uint64:
       relcount = dyn[i].value
+      # debugln &"relcount = {relcount:#x}"
     else:
       discard
 
@@ -63,19 +73,18 @@ proc applyRelocations*(image: ptr UncheckedArray[byte]): uint64 =
     raise newException(Exception, "Invalid dynamic section. .rela.dyn size mismatch.")
 
   # rela points to the first relocation entry
-  let rela = cast[ptr UncheckedArray[RelaEntry]](cast[uint64](image) + reloffset.uint64)
+  let rela = cast[ptr UncheckedArray[RelaEntry]](cast[uint64](elfBase) + reloffset.uint64)
   # debugln &"rela = {cast[uint64](rela):#x}"
 
   for i in 0 ..< relcount:
     let relent = rela[i]
     # debugln &"relent = (.offset = {relent.offset:#x}, .info = {relent.info:#x}, .addend = {relent.addend:#x})"
     if relent.info != RelaEntryType.Relative.uint64:
-      raise newException(Exception, "Only relative relocations are supported.")
+      # raise newException(Exception, "Only relative relocations are supported.")
+      debugln "Only relative relocations are supported."
+      continue
     # apply relocation
     let target = cast[ptr uint64](cast[uint64](image) + relent.offset)
     let value = cast[uint64](cast[int64](image) + relent.addend)
     # debugln &"target = {cast[uint64](target):#x}, value = {value:#x}"
     target[] = value
-
-  # entry point comes after .rela.dyn
-  return cast[uint64](image) + reloffset + relsize

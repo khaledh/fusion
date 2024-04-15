@@ -57,7 +57,6 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
     imagePageCount = bootInfo.userImagePages,
   )
-  debugln &"kernel: Task loadeed at {task1.vaddr.uint64:#x}"
 
   # var task2 = createTask(
   #   imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,

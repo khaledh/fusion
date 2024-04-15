@@ -27,7 +27,7 @@ type
 const
   KernelSpaceMinAddress* = 0xffff800000000000'u64.VirtAddr
   KernelSpaceMaxAddress* = 0xffffffffffffffff'u64.VirtAddr
-  UserSpaceMinAddress* = 0x0000000000000000'u64.VirtAddr
+  UserSpaceMinAddress* = 0x0000000000001000'u64.VirtAddr
   UserSpaceMaxAddress* = 0x00007fffffffffff'u64.VirtAddr
 
 var
@@ -218,9 +218,15 @@ proc vmalloc*(space: var VMAddressSpace, pageCount: uint64): Option[VMRegion] =
 
   result = some vmRegion
 
-proc vmmap*(region: VMRegion, pml4: ptr PML4Table, pageAccess: PageAccess, pageMode: PageMode) =
+proc vmmap*(
+  region: VMRegion,
+  pml4: ptr PML4Table,
+  pageAccess: PageAccess,
+  pageMode: PageMode
+): PhysAddr {.discardable.} =
   let  physAddr = pmalloc(region.npages).get # TODO: handle allocation failure
   mapRegion(pml4, region.start, physAddr, region.npages, pageAccess, pageMode)
+  result = physAddr
 
 
 ####################################################################################################

@@ -1,3 +1,5 @@
+ENTRY(UserMain)
+
 SECTIONS
 {
   .dynamic     : { *(.dynamic) }
@@ -12,6 +14,9 @@ SECTIONS
   .rodata      : { *(.*rodata*) }
   .data        : { *(.*data*) *(.*bss) }
 
-  .shstrtab : { *(.shstrtab) } /* cannot be discarded */
-  /DISCARD/ : { *(*) }
+  .strtab      : { *(.strtab) }
+  .symtab      : { *(.symtab) }
+
+  .shstrtab    : { *(.shstrtab) } /* cannot be discarded */
+  /DISCARD/    : { *(*) }
 }
