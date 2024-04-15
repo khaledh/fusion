@@ -85,7 +85,7 @@ type
 
   ElfSectionHeader {.packed.} = object
     nameoffset: uint32
-    `type`: uint32
+    `type`: ElfSectionType
     flags: uint64
     vaddr: uint64
     offset: uint64
@@ -146,6 +146,8 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
   # debugln &"  Section header entry count: {header.shnum}"
   # debugln &"  Section header string table index: {header.shstrndx}"
 
+  var dynOffset: int = -1
+
   let shoff = header.shoff
   let shentsize = header.shentsize
   let shnum = header.shnum
@@ -157,11 +159,17 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
     let name = cast[cstring](cast[uint64](shstrtabdata) + sh.nameoffset)
     # debugln &"Section {i}: {name}"
 
+    if sh.type == ElfSectionType.Dynamic:
+      # debugln &"  Dynamic section found at {sh.offset:#x}"
+      dynOffset = cast[int](sh.vaddr)
+
+  if dynOffset == -1:
+    raise newException(Exception, "No dynamic section found")
+
   let phoffset = header.phoff
   let phentsize = header.phentsize
   let phnum = header.phnum
 
-  var dynOffset: uint64 = 0
   var maxVAddr: uint64 = 0
   var minVAddr: uint64 = uint64.high
   for i in 0.uint16 ..< phnum:
@@ -172,33 +180,27 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
       if ph.vaddr + ph.memsz > maxVAddr:
         maxVAddr = ph.vaddr + ph.memsz
     
-    if ph.type == ElfProgramHeaderType.Dynamic:
-      # debugln &"  Dynamic section found at {ph.offset:#x}"
-      dynOffset = ph.offset
-
-  if dynOffset == 0:
-    raise newException(Exception, "No dynamic section found")
 
   if minVAddr != 0:
     raise newException(Exception, "Expecting a PIE binary with a base address of 0")
 
   var totalVMSize = maxVAddr
-  # debugln &"Total VM size: {totalVMSize}"
+  # debugln &"loader: Total VM size: {totalVMSize}"
 
   let pageCount = (totalVMSize + PageSize - 1) div PageSize
   let vmRegionOpt = vmalloc(uspace, pageCount)
   if vmRegionOpt.isNone:
     raise newException(Exception, "Failed to allocate memory")
   let vmRegion = vmRegionOpt.get
-  debugln &"kernel: Allocated {vmRegion.npages} pages at {vmRegion.start.uint64:#x}"
+  debugln &"loader: Allocated {vmRegion.npages} pages at {vmRegion.start.uint64:#x}"
 
   # map the allocated memory into the page tables
   let newPhysAddr = vmmap(vmRegion, pml4, paReadWrite, pmUser)
 
-  # copy the program segments
+  # copy the program segments to their respective locations
 
   # temporarily map the user image in kernel space
-  debugln "kernel: Mapping user image in kernel space"
+  debugln "loader: Mapping user image in kernel space"
   var kpml4 = getActivePML4()
   mapRegion(
     pml4 = kpml4,
@@ -221,13 +223,20 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
       let src = cast[pointer](cast[uint64](image) + ph.offset)
       copyMem(dest, src, ph.filesz)
 
-  debugln "kernel: Applying relocations to user image"
+  debugln "loader: Applying relocations to user image"
   applyRelocations(
     image = cast[ptr UncheckedArray[byte]](vmRegion.start),
-    elfBase = image,
-    dynOffset = dynOffset,
+    dynOffset = cast[uint64](dynOffset),
+  )
+
+  # unmap the user image from kernel space
+  debugln "loader: Unmapping user image from kernel space"
+  unmapRegion(
+    pml4 = kpml4,
+    virtAddr = vmRegion.start,
+    pageCount = pageCount,
   )
 
   result.vmRegion = vmRegion
   result.entryPoint = cast[pointer](vmRegion.start +! header.entry)
-  debugln &"kernel: Entry point: {cast[uint64](result.entryPoint):#x}"
+  debugln &"loader: Entry point: {cast[uint64](result.entryPoint):#x}"

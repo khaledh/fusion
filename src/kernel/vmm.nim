@@ -173,6 +173,32 @@ proc mapPage(
   pt[ptIndex].write = access
   pt[ptIndex].user = mode
 
+proc unmapPage*(pml4: ptr PML4Table, virtAddr: VirtAddr) =
+  let pml4Index = (virtAddr.uint64 shr 39) and 0x1FF
+  let pdptIndex = (virtAddr.uint64 shr 30) and 0x1FF
+  let pdIndex = (virtAddr.uint64 shr 21) and 0x1FF
+  let ptIndex = (virtAddr.uint64 shr 12) and 0x1FF
+
+  let pml4Entry = pml4[pml4Index]
+  if pml4Entry.present == 0:
+    return
+  let pdpt = cast[ptr PDPTable](p2v(PhysAddr(pml4Entry.physAddress shl 12)))
+
+  let pdptEntry = pdpt[pdptIndex]
+  if pdptEntry.present == 0:
+    return
+  let pd = cast[ptr PDTable](p2v(PhysAddr(pdptEntry.physAddress shl 12)))
+
+  let pdEntry = pd[pdIndex]
+  if pdEntry.present == 0:
+    return
+  let pt = cast[ptr PTable](p2v(PhysAddr(pdEntry.physAddress shl 12)))
+
+  var ptEntry = pt[ptIndex]
+  if ptEntry.present == 0:
+    return
+
+  ptEntry.present = 0
 
 ####################################################################################################
 # Map a range of pages
@@ -198,6 +224,13 @@ proc identityMapRegion*(
 ) =
   mapRegion(pml4, physAddr.VirtAddr, physAddr, pageCount, pageAccess, pageMode)
 
+proc unmapRegion*(
+  pml4: ptr PML4Table,
+  virtAddr: VirtAddr,
+  pageCount: uint64,
+) =
+  for i in 0 ..< pageCount:
+    unmapPage(pml4, virtAddr +! i * PageSize)
 
 ####################################################################################################
 # Allocate a range of virtual addresses

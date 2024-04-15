@@ -1,15 +1,21 @@
+import std/strformat
+
 import common/[libc, malloc]
 import syslib/[io, os]
 
 proc NimMain() {.importc.}
 
-let
-  msg = "Hello from user mode!"
-  pmsg = msg.addr
-
 proc UserMain*() {.exportc.} =
   NimMain()
 
-  print(pmsg)
+  let tid = os.getTaskId()
+
+  let hello = &"Hello from task {tid}"
+  print(hello.addr)
+
   yld()
+
+  let bye = &"Bye from task {tid}"
+  print(bye.addr)
+
   exit(0)

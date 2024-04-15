@@ -18,3 +18,12 @@ proc exit*(code: int) =
     : "i" (`SysExit`), "r" (`code`)
     : "rdi", "rsi"
   """
+
+proc getTaskId*(): int =
+  asm """
+    mov rdi, %1
+    syscall
+    : "=a" (`result`)
+    : "i" (`SysGetTaskId`)
+    : "rdi"
+  """

@@ -7,14 +7,14 @@ import sched
 import tasks
 
 type
-  SyscallHandler = proc (args: ptr SyscallArgs): uint64 {.cdecl.}
+  SyscallHandler = proc (args: ptr SyscallArgs): int {.cdecl.}
   SyscallArgs = object
     num: uint64
     arg1, arg2, arg3, arg4, arg5: uint64
   SyscallError* = enum
-    None
-    InvalidSyscall
-    InvalidArg
+    InvalidArg     = -2
+    InvalidSyscall = -1
+    None           = 0
 
 const
   UserAddrSpaceEnd* = 0x00007FFFFFFFFFFF'u64
@@ -64,10 +64,10 @@ proc syscallEntry() {.asmNoStackFrame.} =
     : "rcx", "r11", "rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax"
   """
 
-proc syscall(args: ptr SyscallArgs): uint64 {.exportc.} =
+proc syscall(args: ptr SyscallArgs): int {.exportc.} =
   # debugln &"syscall: num={args.num}"
   if args.num > syscallTable.high.uint64 or syscallTable[args.num] == nil:
-    return InvalidSyscall.uint64
+    return InvalidSyscall.int
   result = syscallTable[args.num](args)
 
 ###############################################################################
@@ -77,7 +77,7 @@ proc syscall(args: ptr SyscallArgs): uint64 {.exportc.} =
 ###
 # Exit
 ###
-proc exit*(args: ptr SyscallArgs): uint64 {.cdecl.} =
+proc exit*(args: ptr SyscallArgs): int {.cdecl.} =
   debugln &"syscall: exit: code={args.arg1}"
   terminateTask(getCurrentTask())
   schedule()
@@ -85,13 +85,13 @@ proc exit*(args: ptr SyscallArgs): uint64 {.cdecl.} =
 ###
 # Print
 ###
-proc print*(args: ptr SyscallArgs): uint64 {.cdecl.} =
+proc print*(args: ptr SyscallArgs): int {.cdecl.} =
   # debugln &"syscall: print (arg1={args.arg1:#x})"
   # debugln &"syscall: print: arg1.len = {cast[ptr uint64](args.arg1)[]}"
   # debugln &"syscall: print: arg1.p   = {cast[ptr uint64](args.arg1 + 8)[]:#x}"
   if args.arg1 > UserAddrSpaceEnd:
     debugln "syscall: print: Invalid pointer"
-    return InvalidArg.uint64
+    return InvalidArg.int
 
   let s = cast[ptr string](args.arg1)
   debugln s[]
@@ -101,9 +101,17 @@ proc print*(args: ptr SyscallArgs): uint64 {.cdecl.} =
 ###
 # Yield
 ###
-proc `yield`*(args: ptr SyscallArgs): uint64 {.cdecl.} =
+proc `yield`*(args: ptr SyscallArgs): int {.cdecl.} =
   debugln &"syscall: yield"
   schedule()
+
+
+###
+# Get Task ID
+###
+proc getTaskId*(args: ptr SyscallArgs): int {.cdecl.} =
+  debugln &"syscall: getTaskId"
+  result = getCurrentTask().id.int
 
 
 proc syscallInit*() =
@@ -111,6 +119,7 @@ proc syscallInit*() =
   syscallTable[1] = exit
   syscallTable[2] = print
   syscallTable[3] = `yield`
+  syscallTable[4] = getTaskId
 
   # enable syscall feature
   writeMSR(IA32_EFER, readMSR(IA32_EFER) or 1)  # Bit 0: SYSCALL Enable

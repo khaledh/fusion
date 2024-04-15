@@ -33,13 +33,12 @@ type
 
 proc applyRelocations*(
   image: ptr UncheckedArray[byte],
-  elfBase: VirtAddr,
   dynOffset: uint64
 ) =
   # debugln &"applyRelo: image at {cast[uint64](image):#x}, dynOffset = {dynOffset:#x}"
   ## Apply relocations to the image. Return the entry point address.
   var
-    dyn = cast[ptr UncheckedArray[DynamicEntry]](elfBase.uint64 + dynOffset)
+    dyn = cast[ptr UncheckedArray[DynamicEntry]](cast[uint64](image) + dynOffset)
     reloffset = 0'u64
     relsize = 0'u64
     relentsize = 0'u64
@@ -73,7 +72,7 @@ proc applyRelocations*(
     raise newException(Exception, "Invalid dynamic section. .rela.dyn size mismatch.")
 
   # rela points to the first relocation entry
-  let rela = cast[ptr UncheckedArray[RelaEntry]](cast[uint64](elfBase) + reloffset.uint64)
+  let rela = cast[ptr UncheckedArray[RelaEntry]](cast[uint64](image) + reloffset.uint64)
   # debugln &"rela = {cast[uint64](rela):#x}"
 
   for i in 0 ..< relcount:
@@ -81,7 +80,7 @@ proc applyRelocations*(
     # debugln &"relent = (.offset = {relent.offset:#x}, .info = {relent.info:#x}, .addend = {relent.addend:#x})"
     if relent.info != RelaEntryType.Relative.uint64:
       # raise newException(Exception, "Only relative relocations are supported.")
-      debugln "Only relative relocations are supported."
+      debugln "loader: [WARNING] Only relative relocations are supported."
       continue
     # apply relocation
     let target = cast[ptr uint64](cast[uint64](image) + relent.offset)
