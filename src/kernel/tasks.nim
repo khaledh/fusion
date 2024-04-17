@@ -2,9 +2,7 @@ import std/options
 import std/strformat
 
 import common/pagetables
-import cpu
 import debugcon
-import elf
 import loader
 import gdt
 import pmm
@@ -65,7 +63,7 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   result.pml4 = cast[ptr PML4Table](new PML4Table)
 
   debugln &"kernel: Loading task from ELF image"
-  let loadedImage = elf.load(imagePhysAddr, result.pml4)
+  let loadedImage = load(imagePhysAddr, result.pml4)
   let imageRegion = loadedImage.vmRegion
   let entryPoint = loadedImage.entryPoint
 

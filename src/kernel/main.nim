@@ -1,9 +1,7 @@
 import std/strformat
 
 import common/[bootinfo, libc, malloc]
-import cpu
 import debugcon
-import elf
 import idt
 import gdt
 import pmm

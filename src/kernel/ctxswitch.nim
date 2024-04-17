@@ -1,7 +1,4 @@
-import std/strformat
-
 import cpu
-import debugcon
 import gdt
 import tasks
 import vmm
