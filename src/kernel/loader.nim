@@ -49,7 +49,7 @@ proc applyRelocations*(
   while dyn[i].tag != 0:
     case dyn[i].tag
     of DynmaicEntryType.Rela.uint64:
-      reloffset = dynOffset + dyn[i].value
+      reloffset = dyn[i].value
       # debugln &"reloffset = {reloffset:#x}"
     of DynmaicEntryType.RelaSize.uint64:
       relsize = dyn[i].value

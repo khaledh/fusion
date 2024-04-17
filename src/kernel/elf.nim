@@ -222,6 +222,8 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
       let dest = cast[pointer](vmRegion.start +! ph.vaddr)
       let src = cast[pointer](cast[uint64](image) + ph.offset)
       copyMem(dest, src, ph.filesz)
+      if ph.filesz < ph.memsz:
+        zeroMem(cast[pointer](cast[uint64](dest) + ph.filesz), ph.memsz - ph.filesz)
 
   debugln "loader: Applying relocations to user image"
   applyRelocations(
