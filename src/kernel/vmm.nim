@@ -73,6 +73,7 @@ proc vmAddRegion*(space: var VMAddressSpace, start: VirtAddr, npages: uint64) =
 # Active PML4 utilities
 ####################################################################################################
 
+proc p2v*(phys: PhysAddr): VirtAddr
 proc getActivePML4*(): ptr PML4Table =
   var cr3: uint64
   asm """
@@ -81,6 +82,7 @@ proc getActivePML4*(): ptr PML4Table =
   """
   result = cast[ptr PML4Table](p2v(cr3.PhysAddr))
 
+proc v2p(virt: VirtAddr): Option[PhysAddr]
 proc setActivePML4*(pml4: ptr PML4Table) =
   var cr3 = v2p(cast[VirtAddr](pml4)).get
   asm """
@@ -107,23 +109,23 @@ proc v2p*(virt: VirtAddr, pml4: ptr PML4Table): Option[PhysAddr] =
   var ptIndex = (virt.uint64 shr 12) and 0x1FF
 
   if pml4[pml4Index].present == 0:
-    result = none(PhysAddr)
-    return
+    return none(PhysAddr)
+
   let pdptPhysAddr = PhysAddr(pml4[pml4Index].physAddress shl 12)
   let pdpt = cast[ptr PDPTable](p2v(pdptPhysAddr))
   if pdpt[pdptIndex].present == 0:
-    result = none(PhysAddr)
-    return
+    return none(PhysAddr)
+
   let pdPhysAddr = PhysAddr(pdpt[pdptIndex].physAddress shl 12)
   let pd = cast[ptr PDTable](p2v(pdPhysAddr))
   if pd[pdIndex].present == 0:
-    result = none(PhysAddr)
-    return
+    return none(PhysAddr)
+
   let ptPhysAddr = PhysAddr(pd[pdIndex].physAddress shl 12)
   let pt = cast[ptr PTable](p2v(ptPhysAddr))
   if pt[ptIndex].present == 0:
-    result = none(PhysAddr)
-    return
+    return none(PhysAddr)
+
   result = some PhysAddr(pt[ptIndex].physAddress shl 12)
 
 proc v2p(virt: VirtAddr): Option[PhysAddr] =
