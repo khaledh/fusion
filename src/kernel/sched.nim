@@ -1,4 +1,4 @@
-import std/[deques, strformat]
+import std/deques
 
 import cpu
 import ctxswitch

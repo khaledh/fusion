@@ -1,5 +1,3 @@
-import std/strformat
-
 import debugcon
 import gdt
 

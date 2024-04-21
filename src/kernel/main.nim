@@ -1,5 +1,3 @@
-import std/strformat
-
 import common/[bootinfo, libc, malloc]
 import debugcon
 import idt

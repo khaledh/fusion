@@ -1,6 +1,3 @@
-import std/options
-import std/strformat
-
 import common/bootinfo
 import debugcon
 
@@ -8,8 +5,6 @@ const
   FrameSize = 4096
 
 type
-  PhysAddr* = distinct uint64
-
   PMNode = object
     nframes: uint64
     next: ptr PMNode
@@ -26,21 +21,11 @@ var
   physicalMemoryVirtualBase: uint64
   reservedRegions: seq[PMRegion]
 
-template `+!`*(p: PhysAddr, offset: uint64): PhysAddr =
-  PhysAddr(cast[uint64](p) + offset)
-
-template `+!`(p: ptr PMNode, offset: uint64): ptr PMNode =
-  cast[ptr PMNode](cast[uint64](p) + offset)
-
 proc toPhysAddr(p: ptr PMNode): PhysAddr {.inline.} =
   result = PhysAddr(cast[uint64](p) - physicalMemoryVirtualBase)
 
 proc toPMNodePtr(p: PhysAddr): ptr PMNode {.inline.} =
   result = cast[ptr PMNode](cast[uint64](p) + physicalMemoryVirtualBase)
-
-proc `==`(p1, p2: PhysAddr): bool {.inline.} = p1.uint64 == p2.uint64
-proc `<`(p1, p2: PhysAddr): bool {.inline.} = p1.uint64 < p2.uint64
-proc `-`(p1, p2: PhysAddr): uint64 {.inline.} = p1.uint64 - p2.uint64
 
 proc endAddr(paddr: PhysAddr, nframes: uint64): PhysAddr =
   result = paddr +! nframes * FrameSize

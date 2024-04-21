@@ -1,10 +1,8 @@
-import std/options
-import std/strformat
+import std/algorithm
 
 import common/pagetables
 import debugcon
 import vmm
-import pmm
 
 type
   ElfHeader = object
@@ -73,9 +71,9 @@ type
     GnuRelro = (0x6474e552, "GNU_RELRO")
   
   ElfProgramHeaderFlag {.size: sizeof(uint32).} = enum
-    Executable = (1'u32, "Executable")
-    Writable = (2, "Writable")
-    Readable = (4, "Readable")
+    Executable = (0'u32, "E")
+    Writable   = (1, "W")
+    Readable   = (2, "R")
   ElfProgramHeaderFlags = set[ElfProgramHeaderFlag]
 
   ElfSectionHeader {.packed.} = object
@@ -150,11 +148,11 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
   let shentsize = header.shentsize
   let shnum = header.shnum
   let shstrndx = header.shstrndx
-  let shstrtab = cast[ptr ElfSectionHeader](cast[uint64](image) + shoff + shentsize * shstrndx)
-  let shstrtabdata = cast[ptr cstring](cast[uint64](image) + shstrtab.offset)
+  let shstrtab = cast[ptr ElfSectionHeader](image +! (shoff + shentsize * shstrndx))
+  let shstrtabdata = cast[ptr cstring](image +! shstrtab.offset)
   for i in 0.uint16 ..< shnum:
-    let sh = cast[ptr ElfSectionHeader](cast[uint64](image) + shoff + shentsize * i)
-    let name = cast[cstring](cast[uint64](shstrtabdata) + sh.nameoffset)
+    let sh = cast[ptr ElfSectionHeader](image +! (shoff + shentsize * i))
+    let name = cast[cstring](shstrtabdata +! sh.nameoffset)
     # debugln &"Section {i}: {name}"
 
     if sh.type == ElfSectionType.Dynamic:
@@ -168,60 +166,78 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
   let phentsize = header.phentsize
   let phnum = header.phnum
 
-  var maxVAddr: uint64 = 0
-  var minVAddr: uint64 = uint64.high
+  debugln "loader: Program Headers:"
+  debugln "  #  type           offset     vaddr    filesz     memsz   flags     align"
+  var vmRegions: seq[VMRegion] = @[]
   for i in 0.uint16 ..< phnum:
-    let ph = cast[ptr ElfProgramHeader](cast[uint64](image) + phoffset + phentsize * i)
+    let ph = cast[ptr ElfProgramHeader](image +! (phoffset + phentsize * i))
+    debug &"  {i}: {ph.type:11}"
+    debug &"  {ph.offset:>#8x}"
+    debug &"  {ph.vaddr:>#8x}"
+    debug &"  {ph.filesz:>#8x}"
+    debug &"  {ph.memsz:>#8x}"
+    debug &"  {cast[ElfProgramHeaderFlags](ph.flags):>8}"
+    debug &"  {ph.align:>#6x}"
+    debugln ""
     if ph.type == ElfProgramHeaderType.Load:
-      if ph.vaddr < minVAddr:
-        minVAddr = ph.vaddr
-      if ph.vaddr + ph.memsz > maxVAddr:
-        maxVAddr = ph.vaddr + ph.memsz
-    
+      # region in pages
+      let region = VMRegion(
+        start: VirtAddr(ph.vaddr - (ph.vaddr mod PageSize)),
+        npages: (ph.memsz + PageSize - 1) div PageSize,
+        flags: cast[VMRegionFlags](ph.flags),
+      )
+      vmRegions.add(region)
 
-  if minVAddr != 0:
+  if vmRegions.len == 0:
+    raise newException(Exception, "No loadable segments found")
+
+  if vmRegions[0].start.uint64 != 0:
     raise newException(Exception, "Expecting a PIE binary with a base address of 0")
 
-  var totalVMSize = maxVAddr
-  # debugln &"loader: Total VM size: {totalVMSize}"
+  # sort regions by start address and calculate total memory size
+  vmRegions = vmRegions.sortedByIt(it.start)
+  let memSize = vmRegions[^1].end -! vmRegions[0].start
+  let pageCount = (memSize + PageSize - 1) div PageSize
 
-  let pageCount = (totalVMSize + PageSize - 1) div PageSize
-  let vmRegionOpt = vmalloc(uspace, pageCount)
-  if vmRegionOpt.isNone:
-    raise newException(Exception, "Failed to allocate memory")
-  let vmRegion = vmRegionOpt.get
+  let vmRegion = vmalloc(uspace, pageCount).orRaise(
+    newException(Exception, "Failed to allocate memory for the user image")
+  )
   debugln &"loader: Allocated {vmRegion.npages} pages at {vmRegion.start.uint64:#x}"
 
-  # map the allocated memory into the page tables
-  let newPhysAddr = vmmap(vmRegion, pml4, paReadWrite, pmUser)
+  # adjust regions' start addresses based on vmRegion.start
+  for region in vmRegions.mitems:
+    region.start = vmRegion.start +! region.start.uint64
 
-  # copy the program segments to their respective locations
-
-  # temporarily map the user image in kernel space
-  debugln "loader: Mapping user image in kernel space"
+  # map each region into the page tables
   var kpml4 = getActivePML4()
-  mapRegion(
-    pml4 = kpml4,
-    virtAddr = vmRegion.start,
-    physAddr = newPhysAddr,
-    pageCount = pageCount,
-    pageAccess = paReadWrite,
-    pageMode = pmSupervisor,
-  )
+  for region in vmRegions:
+    let access = if region.flags.contains(Write): paReadWrite else: paRead
+    let noExec = not region.flags.contains(Execute)
+    let physAddr = vmmap(region, pml4, access, pmUser, noExec)
+    debugln &"loader: Mapped {region.npages} pages at vaddr {region.start.uint64:#x}"
+    # temporarily map the user image in kernel space so that we can copy the segments and apply relocations
+    mapRegion(
+      pml4 = kpml4,
+      virtAddr = region.start,
+      physAddr = physAddr,
+      pageCount = region.npages,
+      pageAccess = paReadWrite,
+      pageMode = pmSupervisor,
+      noExec = true,
+    )
 
   for i in 0.uint16 ..< phnum:
-    let ph = cast[ptr ElfProgramHeader](cast[uint64](image) + phoffset + phentsize * i)
-    # debug &"Program header {i}: {ph.type}"
-    # debug &"  Flags: {ph.flags:#b}"
-    # debug &"  VAddr: {ph.vaddr:#x}"
-    # debug &"  File size: {ph.filesz}"
-    # debugln &"  Mem size: {ph.memsz}"
-    if ph.type == ElfProgramHeaderType.Load:
-      let dest = cast[pointer](vmRegion.start +! ph.vaddr)
-      let src = cast[pointer](cast[uint64](image) + ph.offset)
-      copyMem(dest, src, ph.filesz)
-      if ph.filesz < ph.memsz:
-        zeroMem(cast[pointer](cast[uint64](dest) + ph.filesz), ph.memsz - ph.filesz)
+    let ph = cast[ptr ElfProgramHeader](image +! (phoffset + phentsize * i))
+    if ph.type != ElfProgramHeaderType.Load:
+      continue
+    # copy the segment from the image to the user memory
+    let dest = cast[pointer](vmRegion.start +! ph.vaddr)
+    let src = cast[pointer](image +! ph.offset)
+    debugln &"loader: Copying segment from offset {ph.offset:#x} to vaddr {cast[uint64](dest):#x} (filesz = {ph.filesz:#x}, memsz = {ph.memsz:#x})"
+    copyMem(dest, src, ph.filesz)
+    if ph.filesz < ph.memsz:
+      zeroMem(cast[pointer](cast[uint64](dest) + ph.filesz), ph.memsz - ph.filesz)
+
 
   debugln "loader: Applying relocations to user image"
   applyRelocations(
@@ -231,11 +247,8 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
 
   # unmap the user image from kernel space
   debugln "loader: Unmapping user image from kernel space"
-  unmapRegion(
-    pml4 = kpml4,
-    virtAddr = vmRegion.start,
-    pageCount = pageCount,
-  )
+  for region in vmRegions:
+    unmapRegion(kpml4, region.start, region.npages)
 
   result.vmRegion = vmRegion
   result.entryPoint = cast[pointer](vmRegion.start +! header.entry)
@@ -268,7 +281,7 @@ proc applyRelocations(image: ptr UncheckedArray[byte], dynOffset: uint64) =
   # debugln &"applyRelo: image at {cast[uint64](image):#x}, dynOffset = {dynOffset:#x}"
   ## Apply relocations to the image. Return the entry point address.
   var
-    dyn = cast[ptr UncheckedArray[DynamicEntry]](cast[uint64](image) + dynOffset)
+    dyn = cast[ptr UncheckedArray[DynamicEntry]](image +! dynOffset)
     reloffset = 0'u64
     relsize = 0'u64
     relentsize = 0'u64
@@ -302,9 +315,10 @@ proc applyRelocations(image: ptr UncheckedArray[byte], dynOffset: uint64) =
     raise newException(Exception, "Invalid dynamic section. .rela.dyn size mismatch.")
 
   # rela points to the first relocation entry
-  let rela = cast[ptr UncheckedArray[RelaEntry]](cast[uint64](image) + reloffset.uint64)
+  let rela = cast[ptr UncheckedArray[RelaEntry]](image +! reloffset)
   # debugln &"rela = {cast[uint64](rela):#x}"
 
+  var appliedCount = 0
   for i in 0 ..< relcount:
     let relent = rela[i]
     # debugln &"relent = (.offset = {relent.offset:#x}, .info = {relent.info:#x}, .addend = {relent.addend:#x})"
@@ -313,7 +327,10 @@ proc applyRelocations(image: ptr UncheckedArray[byte], dynOffset: uint64) =
       debugln "loader: [WARNING] Only relative relocations are supported."
       continue
     # apply relocation
-    let target = cast[ptr uint64](cast[uint64](image) + relent.offset)
-    let value = cast[uint64](cast[int64](image) + relent.addend)
+    let target = cast[ptr uint64](image +! relent.offset)
+    let value = cast[uint64](image +! relent.addend)
     # debugln &"target = {cast[uint64](target):#x}, value = {value:#x}"
     target[] = value
+    inc appliedCount
+
+  debugln &"loader: Applied {appliedCount} relocations"

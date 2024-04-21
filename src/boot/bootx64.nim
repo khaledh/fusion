@@ -1,8 +1,7 @@
-import std/[options, sets, strformat]
+import std/sets
 
 import common/[bootinfo, libc, malloc, pagetables, uefi]
 import kernel/debugcon
-import kernel/pmm
 import kernel/vmm
 
 const

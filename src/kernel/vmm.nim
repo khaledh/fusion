@@ -1,4 +1,4 @@
-import std/[algorithm, options, strformat]
+import std/algorithm
 
 import common/pagetables
 import pmm
@@ -7,12 +7,18 @@ import debugcon
 {.experimental: "codeReordering".}
 
 type
-  VirtAddr* = distinct uint64
   PhysAlloc* = proc (nframes: uint64): Option[PhysAddr]
 
   VMRegion* = object
     start*: VirtAddr
     npages*: uint64
+    flags*: VMRegionFlags
+
+  VMRegionFlag* = enum
+    Execute = (0, "E")
+    Write   = (1, "W")
+    Read    = (2, "R")
+  VMRegionFlags* = set[VMRegionFlag]
 
   VMAddressSpace* = object
     minAddress*: VirtAddr
@@ -44,16 +50,10 @@ var
     regions: @[],
   )
 
+template `end`*(region: VMRegion): VirtAddr = (
+  region.start +! region.npages * PageSize
+)
 
-template `+!`*(p: VirtAddr, offset: uint64): VirtAddr =
-  VirtAddr(cast[uint64](p) + offset)
-
-template `-!`*(p: VirtAddr, offset: uint64): VirtAddr =
-  VirtAddr(cast[uint64](p) - offset)
-
-proc `==`*(a: VirtAddr, b: VirtAddr): bool =  cast[uint64](a) == cast[uint64](b)
-proc `<`*(a: VirtAddr, b: VirtAddr): bool =  cast[uint64](a) < cast[uint64](b)
-proc `<=`*(a: VirtAddr, b: VirtAddr): bool =  cast[uint64](a) <= cast[uint64](b)
 
 proc vmInit*(physMemoryVirtualBase: uint64, physAlloc: PhysAlloc) =
   physicalMemoryVirtualBase = physMemoryVirtualBase
@@ -143,14 +143,17 @@ proc mapPage(
   physAddr: PhysAddr,
   pageAccess: PageAccess,
   pageMode: PageMode,
+  noExec: bool = false,
 ) =
   let pml4Index = (virtAddr.uint64 shr 39) and 0x1FF
   let pdptIndex = (virtAddr.uint64 shr 30) and 0x1FF
   let pdIndex = (virtAddr.uint64 shr 21) and 0x1FF
   let ptIndex = (virtAddr.uint64 shr 12) and 0x1FF
 
-  let access = cast[uint64](pageAccess)
-  let mode = cast[uint64](pageMode)
+  let
+    access = cast[uint64](pageAccess)
+    mode = cast[uint64](pageMode)
+    noExec = cast[uint64](noExec)
 
   # Page Map Level 4 Table
   pml4[pml4Index].write = access
@@ -172,6 +175,7 @@ proc mapPage(
   pt[ptIndex].present = 1
   pt[ptIndex].write = access
   pt[ptIndex].user = mode
+  pt[ptIndex].xd = noExec
 
 proc unmapPage*(pml4: ptr PML4Table, virtAddr: VirtAddr) =
   let pml4Index = (virtAddr.uint64 shr 39) and 0x1FF
@@ -211,9 +215,10 @@ proc mapRegion*(
   pageCount: uint64,
   pageAccess: PageAccess,
   pageMode: PageMode,
+  noExec: bool = false,
 ) =
   for i in 0 ..< pageCount:
-    mapPage(pml4, virtAddr +! i * PageSize, physAddr +! i * PageSize, pageAccess, pageMode)
+    mapPage(pml4, virtAddr +! i * PageSize, physAddr +! i * PageSize, pageAccess, pageMode, noExec)
 
 proc identityMapRegion*(
   pml4: ptr PML4Table,
@@ -221,8 +226,9 @@ proc identityMapRegion*(
   pageCount: uint64,
   pageAccess: PageAccess,
   pageMode: PageMode,
+  noExec: bool = false,
 ) =
-  mapRegion(pml4, physAddr.VirtAddr, physAddr, pageCount, pageAccess, pageMode)
+  mapRegion(pml4, physAddr.VirtAddr, physAddr, pageCount, pageAccess, pageMode, noExec)
 
 proc unmapRegion*(
   pml4: ptr PML4Table,
@@ -255,10 +261,13 @@ proc vmmap*(
   region: VMRegion,
   pml4: ptr PML4Table,
   pageAccess: PageAccess,
-  pageMode: PageMode
+  pageMode: PageMode,
+  noExec: bool = false,
 ): PhysAddr {.discardable.} =
-  let  physAddr = pmalloc(region.npages).get # TODO: handle allocation failure
-  mapRegion(pml4, region.start, physAddr, region.npages, pageAccess, pageMode)
+  let  physAddr = pmalloc(region.npages).orRaise(
+    newException(Exception, "Failed to allocate physical memory")
+  )
+  mapRegion(pml4, region.start, physAddr, region.npages, pageAccess, pageMode, noExec)
   result = physAddr
 
 
@@ -290,14 +299,14 @@ proc dumpPageTable*(pml4: ptr PML4Table) =
       virt = p2v(phys)
       var pml4mapped = pml4Index.uint64 shl (39 + 16)
       pml4mapped = sar(pml4mapped, 16)
-      debugln &"  [{pml4Index:>03}] [{pml4mapped:#018x}]    PDPT: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pml4.entries[pml4Index].user} write={pml4.entries[pml4Index].write}"
+      debugln &"  [{pml4Index:>03}] [{pml4mapped:#018x}]    PDPT: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pml4.entries[pml4Index].user} write={pml4.entries[pml4Index].write} nx={pml4.entries[pml4Index].xd}"
       let pdpt = cast[ptr PDPTable](virt)
       for pdptIndex in 0 ..< 512:
         if pdpt.entries[pdptIndex].present == 1:
           phys = PhysAddr(pdpt.entries[pdptIndex].physAddress shl 12)
           virt = p2v(phys)
           let pdptmapped = pml4mapped or (pdptIndex.uint64 shl 30)
-          debugln &"    [{pdptIndex:>03}] [{pdptmapped:#018x}]    PD: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pdpt.entries[pdptIndex].user} write={pdpt.entries[pdptIndex].write}"
+          debugln &"    [{pdptIndex:>03}] [{pdptmapped:#018x}]    PD: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pdpt.entries[pdptIndex].user} write={pdpt.entries[pdptIndex].write} nx={pdpt.entries[pdptIndex].xd}"
           let pd = cast[ptr PDTable](virt)
           for pdIndex in 0 ..< 512:
             if pd.entries[pdIndex].present == 1:
@@ -306,22 +315,25 @@ proc dumpPageTable*(pml4: ptr PML4Table) =
               virt = p2v(phys)
               # debugln &"  ptVirt = {virt.uint64:#018x}"
               let pdmapped = pdptmapped or (pdIndex.uint64 shl 21)
-              debugln &"      [{pdIndex:>03}] [{pdmapped:#018x}]  PT: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pd.entries[pdIndex].user} write={pd.entries[pdIndex].write}"
+              debugln &"      [{pdIndex:>03}] [{pdmapped:#018x}]  PT: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pd.entries[pdIndex].user} write={pd.entries[pdIndex].write} nx={pd.entries[pdIndex].xd}"
               let pt = cast[ptr PTable](virt)
               for ptIndex in 0 ..< 512:
                 var first = false
                 if pt.entries[ptIndex].present == 1:
-                  if ptIndex == 0 or ptIndex == 511 or (pt.entries[ptIndex-1].present == 0) or (pt.entries[
-                      ptIndex+1].present == 0):
+                  if (ptIndex == 0 or ptIndex == 511 or (pt.entries[ptIndex-1].present == 0) or
+                     (pt.entries[ptIndex+1].present == 0) or
+                     (pt.entries[ptIndex-1].xd != pt.entries[ptIndex].xd) or
+                     (pt.entries[ptIndex+1].xd != pt.entries[ptIndex].xd)
+                  ):
                     phys = PhysAddr(pt.entries[ptIndex].physAddress shl 12)
                     # debugln &"  pagePhys = {phys.uint64:#010x}"
                     virt = p2v(phys)
                     # debugln &"  pageVirt = {virt.uint64:#018x}"
                     let ptmapped = pdmapped or (ptIndex.uint64 shl 12)
-                    debugln &"        \x1b[1;31m[{ptIndex:>03}] [{ptmapped:#018x}] P: phys = {phys.uint64:#018x}                              user={pt.entries[ptIndex].user} write={pt.entries[ptIndex].write}\x1b[1;0m"
-                    if ptIndex == 0 or (pt.entries[ptIndex-1].present == 0):
+                    debugln &"        \x1b[1;31m[{ptIndex:>03}] [{ptmapped:#018x}] P: phys = {phys.uint64:#018x}                              user={pt.entries[ptIndex].user} write={pt.entries[ptIndex].write} nx={pt.entries[ptIndex].xd}\x1b[1;0m"
+                    if ptIndex == 0 or (pt.entries[ptIndex-1].present == 0) or pt.entries[ptIndex-1].xd != pt.entries[ptIndex].xd:
                       first = true
-                  if first and ptIndex < 511 and pt.entries[ptIndex+1].present == 1:
+                  if first and ptIndex < 511 and pt.entries[ptIndex+1].present == 1 and pt.entries[ptIndex+1].xd == pt.entries[ptIndex].xd:
                     debugln "        ..."
                     first = false
 

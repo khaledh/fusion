@@ -1,11 +1,7 @@
-import std/options
-import std/strformat
-
 import common/pagetables
 import debugcon
 import loader
 import gdt
-import pmm
 import vmm
 
 {.experimental: "codeReordering".}
@@ -36,18 +32,12 @@ var
   nextId: uint64 = 0
 
 
-template orRaise[T](opt: Option[T], exc: ref Exception): T =
-  if opt.isSome:
-    opt.get
-  else:
-    raise exc
-
 proc createStack*(task: var Task, space: var VMAddressSpace, npages: uint64, mode: PageMode): TaskStack =
   let stackRegionOpt = vmalloc(space, npages)
   if stackRegionOpt.isNone:
     raise newException(Exception, "tasks: Failed to allocate stack")
   let stackRegion = stackRegionOpt.get
-  vmmap(stackRegion, task.pml4, paReadWrite, mode)
+  vmmap(stackRegion, task.pml4, paReadWrite, mode, noExec = true)
   task.vmRegions.add(stackRegion)
   result.data = cast[ptr UncheckedArray[uint64]](stackRegion.start)
   result.size = npages * PageSize
@@ -62,7 +52,7 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   result.vmRegions = @[]
   result.pml4 = cast[ptr PML4Table](new PML4Table)
 
-  debugln &"kernel: Loading task from ELF image"
+  debugln &"tasks: Loading task from ELF image"
   let loadedImage = load(imagePhysAddr, result.pml4)
   let imageRegion = loadedImage.vmRegion
   let entryPoint = loadedImage.entryPoint
@@ -70,16 +60,16 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   result.vmRegions.add(imageRegion)
 
   result.vaddr = imageRegion.start
-  debugln &"kernel: Task loaded at: {result.vaddr.uint64:#x}"
+  debugln &"tasks: Task loaded at: {result.vaddr.uint64:#x}"
 
   # map kernel space
-  debugln &"kernel: Mapping kernel space in task's page table"
+  debugln &"tasks: Mapping kernel space in task's page table"
   var kpml4 = getActivePML4()
   for i in 256 ..< 512:
     result.pml4.entries[i] = kpml4.entries[i]
 
   # create user and kernel stacks
-  debugln &"kernel: Creating task stacks"
+  debugln &"tasks: Creating task stacks"
   let ustack = createStack(result, uspace, 1, pmUser)
   let kstack = createStack(result, kspace, 1, pmSupervisor)
 
@@ -97,7 +87,7 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   result.rsp = cast[uint64](kstack.data[index - 5].addr)
   result.state = TaskState.New
 
-  debugln &"kernel: Task {taskId} created"
+  debugln &"tasks: Task {taskId} created"
 
 
 proc terminateTask*(task: var Task) =
