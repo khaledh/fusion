@@ -8,116 +8,9 @@ import common/pagetables
 import debugcon
 import vmm
 
+include elf
+
 type
-  ElfHeader = object
-    magic: array[4, char]
-    class: uint8
-    endianness: uint8
-    version: uint8
-    osabi: uint8
-    abiversion: uint8
-    pad: array[7, uint8]
-    `type`: uint16
-    machine: uint16
-    version2: uint32
-    entry: uint64
-    phoff: uint64
-    shoff: uint64
-    flags: uint32
-    ehsize: uint16
-    phentsize: uint16
-    phnum: uint16
-    shentsize: uint16
-    shnum: uint16
-    shstrndx: uint16
-
-  ElfType = enum
-    None = (0'u16, "Unknown")
-    Relocatable = (1, "Relocatable")
-    Executable = (2, "Executable")
-    Shared = (3, "Shared object")
-    Core = (4, "Core")
-  
-  ElfMachine = enum
-    None = (0'u16, "None")
-    Sparc = (0x02, "Sparc")
-    X86 = (0x03, "x86")
-    Mips = (0x08, "MIPS")
-    PowerPC = (0x14, "PowerPC")
-    ARM = (0x28, "Arm")
-    Sparc64 = (0x2b, "Sparc64")
-    IA64 = (0x32, "IA-64")
-    X86_64 = (0x3e, "x86-64")
-    AArch64 = (0xb7, "AArch64")
-    RiscV = (0xf3, "RISC-V")
-
-  ElfProgramHeader {.packed.} = object
-    `type`: ElfProgramHeaderType
-    flags: uint32  # can't use ElfProgramHeaderFlags here because sets are limited to 16-bits
-    offset: uint64
-    vaddr: uint64
-    paddr: uint64
-    filesz: uint64
-    memsz: uint64
-    align: uint64
-
-  ElfProgramHeaderType = enum
-    Null = (0'u32, "NULL")
-    Load = (1, "LOAD")
-    Dynamic = (2, "DYNAMIC")
-    Interp = (3, "INTERP")
-    Note = (4, "NOTE")
-    ShLib = (5, "SHLIB")
-    Phdr = (6, "PHDR")
-    Tls = (7, "TLS")
-    GnuEhFrame = (0x6474e550, "GNU_EH_FRAME")
-    GnuStack = (0x6474e551, "GNU_STACK")
-    GnuRelro = (0x6474e552, "GNU_RELRO")
-  
-  ElfProgramHeaderFlag {.size: sizeof(uint32).} = enum
-    Executable = (0'u32, "E")
-    Writable   = (1, "W")
-    Readable   = (2, "R")
-  ElfProgramHeaderFlags = set[ElfProgramHeaderFlag]
-
-  ElfSectionHeader {.packed.} = object
-    nameoffset: uint32
-    `type`: ElfSectionType
-    flags: uint64
-    vaddr: uint64
-    offset: uint64
-    size: uint64
-    link: uint32
-    info: uint32
-    addralign: uint64
-    entsize: uint64
-  
-  ElfSectionType = enum
-    Null = (0'u32, "NULL")
-    ProgBits = (1, "PROGBITS")
-    SymTab = (2, "SYMTAB")
-    StrTab = (3, "STRTAB")
-    Rela = (4, "RELA")
-    Hash = (5, "HASH")
-    Dynamic = (6, "DYNAMIC")
-    Note = (7, "NOTE")
-    NoBits = (8, "NOBITS")
-    Rel = (9, "REL")
-    ShLib = (10, "SHLIB")
-    DynSym = (11, "DYNSYM")
-    InitArray = (14, "INIT_ARRAY")
-    FiniArray = (15, "FINI_ARRAY")
-    PreInitArray = (16, "PREINIT_ARRAY")
-    Group = (17, "GROUP")
-    SymTabShndx = (18, "SYMTAB_SHNDX")
-    GnuAttributes = (0x6ffffff5, "GNU_ATTRIBUTES")
-    GnuHash = (0x6ffffff6, "GNU_HASH")
-    GnuLibList = (0x6ffffff7, "GNU_LIBLIST")
-    CheckSum = (0x6ffffff8, "CHECKSUM")
-    GnuVerDef = (0x6ffffffd, "GNU_VERDEF")
-    GnuVerNeed = (0x6ffffffe, "GNU_VERNEED")
-    GnuVerSym = (0x6fffffff, "GNU_VERSYM")
-
   LoadedElfImage* = object
     vmRegion*: VMRegion
     entryPoint*: pointer
@@ -126,39 +19,11 @@ type
 proc applyRelocations(image: ptr UncheckedArray[byte], dynOffset: uint64)
 
 proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
-  let image = p2v(imagePhysAddr)
-
-  let header = cast[ptr ElfHeader](image)
-  if header.magic != [0x7f.char, 'E', 'L', 'F']:
-    raise newException(Exception, "Not an ELF file")
-
-  # debugln "ELF header:"
-  # debugln &"  Type: {cast[ElfType](header.`type`)}"
-  # debugln &"  Machine: {cast[ElfMachine](header.machine)}"
-  # debugln &"  Entry: {header.entry:#x}"
-  # debugln &"  Program header offset: {header.phoff:#x}"
-  # debugln &"  Section header offset: {header.shoff:#x}"
-  # debugln &"  Flags: {header.flags:#x}"
-  # debugln &"  ELF header size: {header.ehsize}"
-  # debugln &"  Program header entry size: {header.phentsize}"
-  # debugln &"  Program header entry count: {header.phnum}"
-  # debugln &"  Section header entry size: {header.shentsize}"
-  # debugln &"  Section header entry count: {header.shnum}"
-  # debugln &"  Section header string table index: {header.shstrndx}"
+  let imagePtr = cast[ptr byte](p2v(imagePhysAddr))
+  let image = initElfImage(imagePtr)
 
   var dynOffset: int = -1
-
-  let shoff = header.shoff
-  let shentsize = header.shentsize
-  let shnum = header.shnum
-  let shstrndx = header.shstrndx
-  let shstrtab = cast[ptr ElfSectionHeader](image +! (shoff + shentsize * shstrndx))
-  let shstrtabdata = cast[ptr cstring](image +! shstrtab.offset)
-  for i in 0.uint16 ..< shnum:
-    let sh = cast[ptr ElfSectionHeader](image +! (shoff + shentsize * i))
-    let name = cast[cstring](shstrtabdata +! sh.nameoffset)
-    # debugln &"Section {i}: {name}"
-
+  for (_, sh) in sections(image):
     if sh.type == ElfSectionType.Dynamic:
       # debugln &"  Dynamic section found at {sh.offset:#x}"
       dynOffset = cast[int](sh.vaddr)
@@ -166,15 +31,10 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
   if dynOffset == -1:
     raise newException(Exception, "No dynamic section found")
 
-  let phoffset = header.phoff
-  let phentsize = header.phentsize
-  let phnum = header.phnum
-
   debugln "loader: Program Headers:"
   debugln "  #  type           offset     vaddr    filesz     memsz   flags     align"
   var vmRegions: seq[VMRegion] = @[]
-  for i in 0.uint16 ..< phnum:
-    let ph = cast[ptr ElfProgramHeader](image +! (phoffset + phentsize * i))
+  for (i, ph) in segments(image):
     debug &"  {i}: {ph.type:11}"
     debug &"  {ph.offset:>#8x}"
     debug &"  {ph.vaddr:>#8x}"
@@ -230,18 +90,16 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
       noExec = true,
     )
 
-  for i in 0.uint16 ..< phnum:
-    let ph = cast[ptr ElfProgramHeader](image +! (phoffset + phentsize * i))
+  # copy loadable segments from the image to the user memory
+  for (i, ph) in segments(image):
     if ph.type != ElfProgramHeaderType.Load:
       continue
-    # copy the segment from the image to the user memory
     let dest = cast[pointer](vmRegion.start +! ph.vaddr)
-    let src = cast[pointer](image +! ph.offset)
+    let src = cast[pointer](imagePtr +! ph.offset)
     debugln &"loader: Copying segment from offset {ph.offset:#x} to vaddr {cast[uint64](dest):#x} (filesz = {ph.filesz:#x}, memsz = {ph.memsz:#x})"
     copyMem(dest, src, ph.filesz)
     if ph.filesz < ph.memsz:
       zeroMem(cast[pointer](cast[uint64](dest) + ph.filesz), ph.memsz - ph.filesz)
-
 
   debugln "loader: Applying relocations to user image"
   applyRelocations(
@@ -255,7 +113,7 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
     unmapRegion(kpml4, region.start, region.npages)
 
   result.vmRegion = vmRegion
-  result.entryPoint = cast[pointer](vmRegion.start +! header.entry)
+  result.entryPoint = cast[pointer](vmRegion.start +! image.header.entry)
   debugln &"loader: Entry point: {cast[uint64](result.entryPoint):#x}"
 
 ####################################################################################################
