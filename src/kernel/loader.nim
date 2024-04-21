@@ -1,3 +1,7 @@
+#[
+  Task loader for ELF binaries
+]#
+
 import std/algorithm
 
 import common/pagetables

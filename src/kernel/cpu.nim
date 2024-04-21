@@ -1,3 +1,7 @@
+#[
+  CPU related functions and constants
+]#
+
 const
   IA32_EFER* = 0xC0000080'u32
 

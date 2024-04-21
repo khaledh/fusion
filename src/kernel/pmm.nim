@@ -1,3 +1,7 @@
+#[
+  Physical memory manager (PMM)
+]#
+
 import common/bootinfo
 import debugcon
 

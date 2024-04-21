@@ -1,3 +1,7 @@
+#[
+  Fusion kernel UEFI bootloader
+]#
+
 import std/sets
 
 import common/[bootinfo, libc, malloc, pagetables, uefi]

@@ -1,3 +1,7 @@
+#[
+  x86_64 UEFI bindings for Nim
+]#
+
 type
   EfiGuid* = object
     data1: uint32

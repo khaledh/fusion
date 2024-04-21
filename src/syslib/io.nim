@@ -1,3 +1,7 @@
+#[
+  Fusion kernel I/O library functions
+]#
+
 include syscalldef
 
 proc print*(pstr: ptr string) =

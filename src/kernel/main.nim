@@ -1,3 +1,7 @@
+#[
+  Fusion kernel
+]#
+
 import common/[bootinfo, libc, malloc]
 import debugcon
 import idt

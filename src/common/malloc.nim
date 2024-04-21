@@ -1,3 +1,7 @@
+#[
+  A simple heap bump allocator that is used for Nim's `any` target.
+]#
+
 {.used.}
 
 import kernel/debugcon

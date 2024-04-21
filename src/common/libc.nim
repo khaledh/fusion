@@ -1,3 +1,7 @@
+#[
+  Minimal C library implementation for Nim's `any` target.
+]#
+
 {.used.}
 
 import std/strutils

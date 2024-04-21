@@ -1,3 +1,7 @@
+#[
+  This is an example of a user task.
+]#
+
 import std/strformat
 
 import common/[libc, malloc]

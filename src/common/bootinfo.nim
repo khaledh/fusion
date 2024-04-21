@@ -1,3 +1,8 @@
+#[
+  BootInfo is a struct that is passed to the kernel by the bootloader.
+  It contains information about the system's memory layout.
+]#
+
 type
   MemoryType* = enum
     Free

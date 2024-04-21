@@ -1,3 +1,7 @@
+#[
+  x86_64 paging structures
+]#
+
 const
   PageSize* = 4096
 

@@ -1,3 +1,7 @@
+#[
+  x86_64 Interrupt Descriptor Table (IDT)
+]#
+
 import debugcon
 import gdt
 

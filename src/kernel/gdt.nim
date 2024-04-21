@@ -1,3 +1,7 @@
+#[
+  x86_64 Global Descriptor Table (GDT)
+]#
+
 type
   CodeSegmentDescriptor* {.packed.} = object
     limit00: uint16 = 0xffff

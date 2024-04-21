@@ -1,3 +1,7 @@
+#[
+  Fusion kernel OS library functions
+]#
+
 include syscalldef
 
 proc yld*() =

@@ -1,3 +1,7 @@
+#[
+  Prelude module that gets imported by all other modules (through the --import flag in nim.cfg)
+]#
+
 {.used.}
 
 import std/[options, strformat]

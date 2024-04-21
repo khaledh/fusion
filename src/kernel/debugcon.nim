@@ -1,3 +1,7 @@
+#[
+  Debug console output
+]#
+
 import ports
 
 const DebugConPort = 0xe9
