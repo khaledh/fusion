@@ -67,6 +67,26 @@ proc vmAddRegion*(space: var VMAddressSpace, start: VirtAddr, npages: uint64) =
   space.regions.add VMRegion(start: start, npages: npages)
 
 ####################################################################################################
+# Active PML4 utilities
+####################################################################################################
+
+proc getActivePML4*(): ptr PML4Table =
+  var cr3: uint64
+  asm """
+    mov %0, cr3
+    : "=r"(`cr3`)
+  """
+  result = cast[ptr PML4Table](p2v(cr3.PhysAddr))
+
+proc setActivePML4*(pml4: ptr PML4Table) =
+  var cr3 = v2p(cast[VirtAddr](pml4)).get
+  asm """
+    mov cr3, %0
+    :
+    : "r"(`cr3`)
+  """
+
+####################################################################################################
 # Mapping between virtual and physical addresses
 ####################################################################################################
 
@@ -105,27 +125,6 @@ proc v2p*(virt: VirtAddr, pml4: ptr PML4Table): Option[PhysAddr] =
 
 proc v2p(virt: VirtAddr): Option[PhysAddr] =
   v2p(virt, getActivePML4())
-
-
-####################################################################################################
-# Active PML4 utilities
-####################################################################################################
-
-proc getActivePML4*(): ptr PML4Table =
-  var cr3: uint64
-  asm """
-    mov %0, cr3
-    : "=r"(`cr3`)
-  """
-  result = cast[ptr PML4Table](p2v(cr3.PhysAddr))
-
-proc setActivePML4*(pml4: ptr PML4Table) =
-  var cr3 = v2p(cast[VirtAddr](pml4)).get
-  asm """
-    mov cr3, %0
-    :
-    : "r"(`cr3`)
-  """
 
 ####################################################################################################
 # Map a single page
