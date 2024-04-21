@@ -31,20 +31,9 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
   if dynOffset == -1:
     raise newException(Exception, "No dynamic section found")
 
-  debugln "loader: Program Headers:"
-  debugln "  #  type           offset     vaddr    filesz     memsz   flags     align"
   var vmRegions: seq[VMRegion] = @[]
   for (i, ph) in segments(image):
-    debug &"  {i}: {ph.type:11}"
-    debug &"  {ph.offset:>#8x}"
-    debug &"  {ph.vaddr:>#8x}"
-    debug &"  {ph.filesz:>#8x}"
-    debug &"  {ph.memsz:>#8x}"
-    debug &"  {cast[ElfProgramHeaderFlags](ph.flags):>8}"
-    debug &"  {ph.align:>#6x}"
-    debugln ""
     if ph.type == ElfProgramHeaderType.Load:
-      # region in pages
       let region = VMRegion(
         start: VirtAddr(ph.vaddr - (ph.vaddr mod PageSize)),
         npages: (ph.memsz + PageSize - 1) div PageSize,
@@ -78,7 +67,7 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
     let access = if region.flags.contains(Write): paReadWrite else: paRead
     let noExec = not region.flags.contains(Execute)
     let physAddr = vmmap(region, pml4, access, pmUser, noExec)
-    debugln &"loader: Mapped {region.npages} pages at vaddr {region.start.uint64:#x}"
+    # debugln &"loader: Mapped {region.npages} pages at vaddr {region.start.uint64:#x}"
     # temporarily map the user image in kernel space so that we can copy the segments and apply relocations
     mapRegion(
       pml4 = kpml4,
@@ -96,7 +85,7 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
       continue
     let dest = cast[pointer](vmRegion.start +! ph.vaddr)
     let src = cast[pointer](imagePtr +! ph.offset)
-    debugln &"loader: Copying segment from offset {ph.offset:#x} to vaddr {cast[uint64](dest):#x} (filesz = {ph.filesz:#x}, memsz = {ph.memsz:#x})"
+    # debugln &"loader: Copying segment from offset {ph.offset:#x} to vaddr {cast[uint64](dest):#x} (filesz = {ph.filesz:#x}, memsz = {ph.memsz:#x})"
     copyMem(dest, src, ph.filesz)
     if ph.filesz < ph.memsz:
       zeroMem(cast[pointer](cast[uint64](dest) + ph.filesz), ph.memsz - ph.filesz)

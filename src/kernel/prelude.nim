@@ -7,6 +7,9 @@
 import std/[options, strformat]
 export options, strformat
 
+import debugcon
+export debugcon
+
 template orRaise*[T](opt: Option[T], exc: ref Exception): T =
   if opt.isSome:
     opt.get

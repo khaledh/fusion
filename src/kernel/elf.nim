@@ -1,3 +1,7 @@
+#[
+  ELF image support
+]#
+
 type
   ElfImage = object
     header: ptr ElfHeader
@@ -143,7 +147,8 @@ iterator sections(image: ElfImage): tuple[i: uint16, sh: ptr ElfSectionHeader] =
   let shstrtabdata = cast[ptr cstring](header +! shstrtab.offset)
 
   for i in 0.uint16 ..< shnum:
-    yield (i, cast[ptr ElfSectionHeader](header +! (shoff + shentsize * i)))
+    let sh = cast[ptr ElfSectionHeader](header +! (shoff + shentsize * i))
+    yield (i, sh)
 
 iterator segments(image: ElfImage): tuple[i: uint16, ph: ptr ElfProgramHeader] =
   let header = image.header
@@ -152,5 +157,16 @@ iterator segments(image: ElfImage): tuple[i: uint16, ph: ptr ElfProgramHeader] =
   let phentsize = header.phentsize
   let phnum = header.phnum
 
+  # debugln "loader: Program Headers:"
+  # debugln "  #  type           offset     vaddr    filesz     memsz   flags     align"
   for i in 0.uint16 ..< phnum:
-    yield (i, cast[ptr ElfProgramHeader](header +! (phoff + phentsize * i)))
+    let ph = cast[ptr ElfProgramHeader](header +! (phoff + phentsize * i))
+    # debug &"  {i}: {ph.type:11}"
+    # debug &"  {ph.offset:>#8x}"
+    # debug &"  {ph.vaddr:>#8x}"
+    # debug &"  {ph.filesz:>#8x}"
+    # debug &"  {ph.memsz:>#8x}"
+    # debug &"  {cast[ElfProgramHeaderFlags](ph.flags):>8}"
+    # debug &"  {ph.align:>#6x}"
+    # debugln ""
+    yield (i, ph)
