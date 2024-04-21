@@ -11,7 +11,7 @@ import debugcon
 {.experimental: "codeReordering".}
 
 type
-  PhysAlloc* = proc (nframes: uint64): Option[PhysAddr]
+  PhysAlloc* = proc (nframes: uint64): PhysAddr
 
   VMRegion* = object
     start*: VirtAddr
@@ -33,6 +33,9 @@ type
   #   AnyAddress
   #   MaxAddress
   #   ExactAddress
+
+  OutOfMemoryError* = object of CatchableError
+
 
 const
   KernelSpaceMinAddress* = 0xffff800000000000'u64.VirtAddr
@@ -135,7 +138,7 @@ proc getOrCreateEntry[P, C](parent: ptr P, index: uint64): ptr C =
   if parent[index].present == 1:
     physAddr = PhysAddr(parent[index].physAddress shl 12)
   else:
-    physAddr = pmalloc(1).get # TODO: handle allocation failure
+    physAddr = pmalloc(1)
     parent[index].physAddress = physAddr.uint64 shr 12
     parent[index].present = 1
   result = cast[ptr C](p2v(physAddr))
@@ -245,20 +248,21 @@ proc unmapRegion*(
 # Allocate a range of virtual addresses
 ####################################################################################################
 
-proc vmalloc*(space: var VMAddressSpace, pageCount: uint64): Option[VMRegion] =
+proc vmalloc*(space: var VMAddressSpace, pageCount: uint64): VMRegion =
   # find a free region
-  var virtAddr: VirtAddr = space.minAddress
+  var minAddr = space.minAddress
   for region in space.regions:
-    if virtAddr +! pageCount * PageSize <= region.start:
+    if minAddr +! pageCount * PageSize <= region.start:
       break
-    virtAddr = region.start +! region.npages * PageSize
+    minAddr = region.end
+
+  if minAddr +! pageCount * PageSize > space.maxAddress:
+    raise newException(OutOfMemoryError, "Out of virtual memory")
 
   # add the region to the address space, and sort the regions by start address
-  let vmRegion = VMRegion(start: virtAddr, npages: pageCount)
-  space.regions.add(vmRegion)
+  result = VMRegion(start: minAddr, npages: pageCount)
+  space.regions.add(result)
   space.regions = space.regions.sortedByIt(it.start)
-
-  result = some vmRegion
 
 proc vmmap*(
   region: VMRegion,
@@ -267,11 +271,8 @@ proc vmmap*(
   pageMode: PageMode,
   noExec: bool = false,
 ): PhysAddr {.discardable.} =
-  let  physAddr = pmalloc(region.npages).orRaise(
-    newException(Exception, "Failed to allocate physical memory")
-  )
-  mapRegion(pml4, region.start, physAddr, region.npages, pageAccess, pageMode, noExec)
-  result = physAddr
+  result = pmalloc(region.npages)
+  mapRegion(pml4, region.start, result, region.npages, pageAccess, pageMode, noExec)
 
 
 ####################################################################################################

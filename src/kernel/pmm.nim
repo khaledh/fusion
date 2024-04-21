@@ -18,6 +18,7 @@ type
     nframes*: uint64
   
   InvalidRequest* = object of CatchableError
+  OutOfPhysicalMemory* = object of CatchableError
 
 var
   head: ptr PMNode
@@ -102,7 +103,7 @@ iterator pmFreeRegions*(): tuple[paddr: PhysAddr, nframes: uint64] =
     yield (node.toPhysAddr, node.nframes)
     node = node.next
 
-proc pmAlloc*(nframes: uint64): Option[PhysAddr] =
+proc pmAlloc*(nframes: uint64): PhysAddr =
   ## Allocate a contiguous region of physical memory.
   assert nframes > 0, "Number of frames must be positive"
 
@@ -117,8 +118,8 @@ proc pmAlloc*(nframes: uint64): Option[PhysAddr] =
   
   if curr.isNil:
     # no region found
-    return none(PhysAddr)
-  
+    raise newException(OutOfPhysicalMemory, "Out of physical memory")
+
   var newnode: ptr PMNode
   if curr.nframes == nframes:
     # exact match
@@ -135,7 +136,7 @@ proc pmAlloc*(nframes: uint64): Option[PhysAddr] =
     head = newnode
 
   zeroMem(curr, nframes * FrameSize)
-  result = some(curr.toPhysAddr)
+  result = curr.toPhysAddr
 
 proc pmFree*(paddr: PhysAddr, nframes: uint64) =
   ## Free a contiguous region of physical memory.

@@ -475,14 +475,14 @@ proc createPageTable(
   physMemoryPages: uint64,
 ): ptr PML4Table =
 
-  proc bootAlloc(nframes: uint64): Option[PhysAddr] =
-    result = some(cast[PhysAddr](new AlignedPage))
+  proc bootAlloc(nframes: uint64): PhysAddr =
+    result = cast[PhysAddr](new AlignedPage)
 
   # initialize vmm using identity-mapped physical memory
   vmInit(physMemoryVirtualBase = 0'u64, physAlloc = bootAlloc)
 
   debugln &"boot: Creating new page tables"
-  var pml4 = cast[ptr PML4Table](bootAlloc(1).get)
+  var pml4 = cast[ptr PML4Table](bootAlloc(1))
 
   # identity-map bootloader image
   debugln &"""boot:   {"Identity-mapping bootloader\:":<30} base={bootloaderBase:#010x}, pages={bootloaderPages}"""

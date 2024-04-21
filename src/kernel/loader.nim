@@ -14,6 +14,8 @@ type
   LoadedElfImage* = object
     vmRegion*: VMRegion
     entryPoint*: pointer
+  
+  LoaderError* = object of CatchableError
 
 
 proc applyRelocations(image: ptr UncheckedArray[byte], dynOffset: uint64)
@@ -29,11 +31,14 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
       dynOffset = cast[int](sh.vaddr)
 
   if dynOffset == -1:
-    raise newException(Exception, "No dynamic section found")
+    raise newException(LoaderError, "No dynamic section found")
 
+  # get a list of page-aligned memory regions to be mapped
   var vmRegions: seq[VMRegion] = @[]
   for (i, ph) in segments(image):
     if ph.type == ElfProgramHeaderType.Load:
+      if ph.align != PageSize:
+        raise newException(LoaderError, &"Unsupported alignment {ph.align:#x} for segment {i}")
       let region = VMRegion(
         start: VirtAddr(ph.vaddr - (ph.vaddr mod PageSize)),
         npages: (ph.memsz + PageSize - 1) div PageSize,
@@ -42,26 +47,25 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
       vmRegions.add(region)
 
   if vmRegions.len == 0:
-    raise newException(Exception, "No loadable segments found")
+    raise newException(LoaderError, "No loadable segments found")
 
   if vmRegions[0].start.uint64 != 0:
-    raise newException(Exception, "Expecting a PIE binary with a base address of 0")
+    raise newException(LoaderError, "Expecting a PIE binary with a base address of 0")
 
-  # sort regions by start address and calculate total memory size
+  # calculate total memory size
   vmRegions = vmRegions.sortedByIt(it.start)
   let memSize = vmRegions[^1].end -! vmRegions[0].start
   let pageCount = (memSize + PageSize - 1) div PageSize
 
-  let vmRegion = vmalloc(uspace, pageCount).orRaise(
-    newException(Exception, "Failed to allocate memory for the user image")
-  )
+  # allocate a single contiguous region for the user image
+  let vmRegion = vmalloc(uspace, pageCount)
   debugln &"loader: Allocated {vmRegion.npages} pages at {vmRegion.start.uint64:#x}"
 
-  # adjust regions' start addresses based on vmRegion.start
+  # adjust the individual regions' start addresses based on vmRegion.start
   for region in vmRegions.mitems:
     region.start = vmRegion.start +! region.start.uint64
 
-  # map each region into the page tables
+  # map each region into the page tables, making sure to set the R/W and NX flags as needed
   var kpml4 = getActivePML4()
   for region in vmRegions:
     let access = if region.flags.contains(Write): paReadWrite else: paRead
@@ -90,7 +94,7 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
     if ph.filesz < ph.memsz:
       zeroMem(cast[pointer](cast[uint64](dest) + ph.filesz), ph.memsz - ph.filesz)
 
-  debugln "loader: Applying relocations to user image"
+  # apply relocations
   applyRelocations(
     image = cast[ptr UncheckedArray[byte]](vmRegion.start),
     dynOffset = cast[uint64](dynOffset),
@@ -160,10 +164,10 @@ proc applyRelocations(image: ptr UncheckedArray[byte], dynOffset: uint64) =
     inc i
 
   if reloffset == 0 or relsize == 0 or relentsize == 0 or relcount == 0:
-    raise newException(Exception, "Invalid dynamic section. Missing .dynamic information.")
+    raise newException(LoaderError, "Invalid dynamic section. Missing .dynamic information.")
 
   if relsize != relentsize * relcount:
-    raise newException(Exception, "Invalid dynamic section. .rela.dyn size mismatch.")
+    raise newException(LoaderError, "Invalid dynamic section. .rela.dyn size mismatch.")
 
   # rela points to the first relocation entry
   let rela = cast[ptr UncheckedArray[RelaEntry]](image +! reloffset)
@@ -174,9 +178,10 @@ proc applyRelocations(image: ptr UncheckedArray[byte], dynOffset: uint64) =
     let relent = rela[i]
     # debugln &"relent = (.offset = {relent.offset:#x}, .info = {relent.info:#x}, .addend = {relent.addend:#x})"
     if relent.info != RelaEntryType.Relative.uint64:
-      # raise newException(Exception, "Only relative relocations are supported.")
-      debugln "loader: [WARNING] Only relative relocations are supported."
-      continue
+      raise newException(
+        LoaderError,
+        &"Unsupported relocation type {relent.info:#x}. Only R_X86_64_RELATIVE is supported."
+      )
     # apply relocation
     let target = cast[ptr uint64](image +! relent.offset)
     let value = cast[uint64](image +! relent.addend)

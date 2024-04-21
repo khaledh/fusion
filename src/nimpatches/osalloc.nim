@@ -26,8 +26,12 @@ import kernel/vmm
 
 proc osTryAllocPages(size: int): pointer {.inline.} =
   let pageAccess = paReadWrite
-  let (ok, vaddr) = vmalloc(kspace, roundup(size, PageSize), paWrite, pmSupervisor)
-  result = if ok: cast[pointer](vaddr) else: nil
+  try:
+    let vaddr = vmalloc(kspace, roundup(size, PageSize), paWrite, pmSupervisor)
+  except OutOfMemoryError:
+    return nil
+
+  result = cast[pointer](vaddr)
 
 proc osAllocPages(size: int): pointer {.inline.} =
   result = osTryAllocPages(size)

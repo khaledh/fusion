@@ -37,10 +37,7 @@ var
 
 
 proc createStack*(task: var Task, space: var VMAddressSpace, npages: uint64, mode: PageMode): TaskStack =
-  let stackRegionOpt = vmalloc(space, npages)
-  if stackRegionOpt.isNone:
-    raise newException(Exception, "tasks: Failed to allocate stack")
-  let stackRegion = stackRegionOpt.get
+  let stackRegion = vmalloc(space, npages)
   vmmap(stackRegion, task.pml4, paReadWrite, mode, noExec = true)
   task.vmRegions.add(stackRegion)
   result.data = cast[ptr UncheckedArray[uint64]](stackRegion.start)
