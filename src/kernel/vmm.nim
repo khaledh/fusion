@@ -86,9 +86,14 @@ proc v2p(virt: VirtAddr): Option[PhysAddr]
 proc setActivePML4*(pml4: ptr PML4Table) =
   var cr3 = v2p(cast[VirtAddr](pml4)).get
   asm """
+    mov rcx, cr3
+    cmp rcx, %0
+    jz .done
     mov cr3, %0
+  .done:
     :
     : "r"(`cr3`)
+    : "rcx"
   """
 
 ####################################################################################################
