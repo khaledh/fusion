@@ -89,10 +89,6 @@ createHandler(cpuSimdFloatingPointExceptionHandler, "SIMD Floating Point Excepti
 createHandler(cpuVirtualizationExceptionHandler, "Virtualization Exception")
 createHandler(cpuControlProtectionExceptionHandler, "Control Protection Exception")
 
-proc isr100(frame: pointer) {.cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#".} =
-  debugln "Hello from isr100"
-  quit()
-
 proc idtInit*() =
   installHandler(0, cpuDivideErrorHandler)
   installHandler(1, cpuDebugErrorHandler)
@@ -115,8 +111,6 @@ proc idtInit*() =
   installHandler(19, cpuSimdFloatingPointExceptionHandler)
   installHandler(20, cpuVirtualizationExceptionHandler)
   installHandler(21, cpuControlProtectionExceptionHandler)
-
-  installHandler(100, isr100, dpl = 3)
 
   asm """
     lidt %0

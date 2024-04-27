@@ -24,7 +24,6 @@ type
     ustack*: TaskStack
     kstack*: TaskStack
     state*: TaskState
-    vaddr*: VirtAddr
   
   TaskState* = enum
     New
@@ -55,13 +54,8 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
 
   debugln &"tasks: Loading task from ELF image"
   let loadedImage = load(imagePhysAddr, result.pml4)
-  let imageRegion = loadedImage.vmRegion
-  let entryPoint = loadedImage.entryPoint
-
-  result.vmRegions.add(imageRegion)
-
-  result.vaddr = imageRegion.start
-  debugln &"tasks: Task loaded at: {result.vaddr.uint64:#x}"
+  result.vmRegions.add(loadedImage.vmRegion)
+  debugln &"tasks: Loaded task at: {loadedImage.vmRegion.start.uint64:#x}"
 
   # map kernel space
   debugln &"tasks: Mapping kernel space in task's page table"
@@ -75,12 +69,13 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   let kstack = createStack(result, kspace, 1, pmSupervisor)
 
   # create interrupt stack frame
+  debugln &"tasks: Setting up interrupt stack frame"
   var index = kstack.size div 8
-  kstack.data[index - 1] = cast[uint64](DataSegmentSelector) # SS
-  kstack.data[index - 2] = cast[uint64](ustack.bottom) # RSP
-  kstack.data[index - 3] = cast[uint64](0x202) # RFLAGS
-  kstack.data[index - 4] = cast[uint64](UserCodeSegmentSelector) # CS
-  kstack.data[index - 5] = cast[uint64](entryPoint) # RIP
+  kstack.data[index - 1] = cast[uint64](DataSegmentSelector) # ss
+  kstack.data[index - 2] = cast[uint64](ustack.bottom) # rsp
+  kstack.data[index - 3] = cast[uint64](0x202) # rflags
+  kstack.data[index - 4] = cast[uint64](UserCodeSegmentSelector) # cs
+  kstack.data[index - 5] = cast[uint64](loadedImage.entryPoint) # rip
 
   result.id = taskId
   result.ustack = ustack
@@ -88,10 +83,40 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   result.rsp = cast[uint64](kstack.data[index - 5].addr)
   result.state = TaskState.New
 
-  debugln &"tasks: Task {taskId} created"
+  debugln &"tasks: Created user task {taskId}"
 
 
 proc terminateTask*(task: var Task) =
+  debugln &"tasks: Terminating task {task.id}"
   # vmfree(task.space, task.ustack.data, task.ustack.size div PageSize)
   # vmfree(task.space, task.kstack.data, task.kstack.size div PageSize)
   task.state = TaskState.Terminated
+
+
+type
+  KernelProc[T] = proc (arg: T)
+
+proc createKernelTask*[T](kproc: KernelProc[T], arg: T): Task =
+  new(result)
+
+  let taskId = nextId
+  inc nextId
+
+  result.vmRegions = @[]
+  result.pml4 = getActivePML4()
+
+  debugln &"tasks: Creating kernel task"
+  let stack = createStack(result, kspace, 1, pmSupervisor)
+
+  # create stack frame
+  debugln &"tasks: Setting up stack frame"
+  var index = stack.size div 8
+  stack.data[index - 1] = cast[uint64](arg)
+  stack.data[index - 2] = cast[uint64](kproc) # rip
+
+  result.id = taskId
+  result.kstack = stack
+  result.rsp = cast[uint64](stack.data[index - 2].addr)
+  result.state = TaskState.New
+
+  debugln &"tasks: Created kernel task {taskId}"

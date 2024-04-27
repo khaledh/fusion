@@ -22,6 +22,9 @@ type
   VirtAddr* = distinct uint64
   PhysAddr* = distinct uint64
 
+const
+  PageSize* = 4096
+
 # virtual address operations
 
 template `+!`*(p: VirtAddr, offset: uint64): VirtAddr = VirtAddr(cast[uint64](p) + offset)

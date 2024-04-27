@@ -3,13 +3,16 @@
 ]#
 
 import common/[bootinfo, libc, malloc]
+import common/pagetables
 import debugcon
 import idt
+import lapic
 import gdt
 import pmm
 import sched
 import syscalls
 import tasks
+import timer
 import vmm
 
 proc NimMain() {.importc.}
@@ -30,27 +33,42 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   debugln ""
   debugln "kernel: Fusion Kernel"
 
-  debug "kernel: Initializing PMM "
+  debugln "kernel: Initializing PMM"
   pmInit(bootInfo.physicalMemoryVirtualBase, bootInfo.physicalMemoryMap)
-  debugln "[success]"
 
-  debug "kernel: Initializing VMM "
+  debugln "kernel: Initializing VMM"
   vmInit(bootInfo.physicalMemoryVirtualBase, pmm.pmAlloc)
   vmAddRegion(kspace, bootInfo.kernelImageVirtualBase.VirtAddr, bootInfo.kernelImagePages)
   vmAddRegion(kspace, bootInfo.kernelStackVirtualBase.VirtAddr, bootInfo.kernelStackPages)
-  debugln "[success]"
 
-  debug "kernel: Initializing GDT "
+  debugln "kernel: Initializing GDT"
   gdtInit()
-  debugln "[success]"
 
-  debug "kernel: Initializing IDT "
+  debugln "kernel: Initializing IDT"
   idtInit()
-  debugln "[success]"
 
-  debug "kernel: Initializing Syscalls "
+  debugln "kernel: Initializing LAPIC "
+  let lapicPhysAddr = lapic.getBasePhysAddr()
+  let lapicFrameAddr = lapicPhysAddr - (lapicPhysAddr mod PageSize)
+  # map LAPIC frame into virtual memory
+  let lapicVMRegion = vmalloc(kspace, 1)
+  mapRegion(
+    pml4 = getActivePML4(),
+    virtAddr = lapicVMRegion.start,
+    physAddr = lapicFrameAddr.PhysAddr,
+    pageCount = 1,
+    pageAccess = paReadWrite,
+    pageMode = pmSupervisor,
+    noExec = true
+  )
+  lapicInit(lapicVMRegion.start.uint64)
+
+
+  debugln "kernel: Initializing timer"
+  timerInit()
+
+  debugln "kernel: Initializing Syscalls"
   syscallInit()
-  debugln "[success]"
 
   debugln "kernel: Creating user tasks"
   var task1 = createTask(

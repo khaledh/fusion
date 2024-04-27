@@ -2,9 +2,6 @@
   x86_64 paging structures
 ]#
 
-const
-  PageSize* = 4096
-
 type
   # Page Map Level 4 Entry
   PML4Entry* {.packed.} = object

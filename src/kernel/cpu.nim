@@ -3,6 +3,8 @@
 ]#
 
 const
+  IA32_APIC_BASE* = 0x1B'u32
+
   IA32_EFER* = 0xC0000080'u32
 
   IA32_STAR* = 0xC0000081'u32

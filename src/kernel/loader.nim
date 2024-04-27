@@ -71,8 +71,7 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
     let access = if region.flags.contains(Write): paReadWrite else: paRead
     let noExec = not region.flags.contains(Execute)
     let physAddr = vmmap(region, pml4, access, pmUser, noExec)
-    # debugln &"loader: Mapped {region.npages} pages at vaddr {region.start.uint64:#x}"
-    # temporarily map the user image in kernel space so that we can copy the segments and apply relocations
+    # temporarily map the region in kernel space so that we can copy the segments and apply relocations
     mapRegion(
       pml4 = kpml4,
       virtAddr = region.start,
@@ -89,7 +88,6 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
       continue
     let dest = cast[pointer](vmRegion.start +! ph.vaddr)
     let src = cast[pointer](imagePtr +! ph.offset)
-    # debugln &"loader: Copying segment from offset {ph.offset:#x} to vaddr {cast[uint64](dest):#x} (filesz = {ph.filesz:#x}, memsz = {ph.memsz:#x})"
     copyMem(dest, src, ph.filesz)
     if ph.filesz < ph.memsz:
       zeroMem(cast[pointer](cast[uint64](dest) + ph.filesz), ph.memsz - ph.filesz)
