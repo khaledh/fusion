@@ -6,7 +6,8 @@ import debugcon
 import cpu
 import gdt
 import sched
-import tasks
+import taskdef
+import taskmgr
 
 type
   SyscallHandler = proc (args: ptr SyscallArgs): int {.cdecl.}
@@ -27,14 +28,16 @@ var
 
 proc syscallEntry() {.asmNoStackFrame.} =
   asm """
-    # switch to kernel stack
+    # save user stack pointer
     mov %0, rsp
+
+    # switch to kernel stack
     mov rsp, %1
 
     push r11  # user rflags
     push rcx  # user rip
 
-    # create syscall frame
+    # create SyscallArgs on the stack
     push r9
     push r8
     push rcx
@@ -42,10 +45,11 @@ proc syscallEntry() {.asmNoStackFrame.} =
     push rsi
     push rdi
 
+    # rsp is now pointing to SyscallArgs, pass it to syscall
     mov rdi, rsp
     call syscall
 
-    # pop stack frame
+    # pop SyscallArgs
     pop rdi
     pop rsi
     pop rdx
@@ -53,9 +57,9 @@ proc syscallEntry() {.asmNoStackFrame.} =
     pop r8
     pop r9
 
-    # prepare for sysret
-    pop rcx  # rip
-    pop r11  # rflags
+    # prepare for sysretq
+    pop rcx  # user rip
+    pop r11  # user rflags
 
     # switch to user stack
     mov rsp, %0

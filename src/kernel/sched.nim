@@ -7,7 +7,7 @@ import std/deques
 import cpu
 import ctxswitch
 import debugcon
-import tasks
+import taskdef
 
 {.experimental: "codeReordering".}
 
@@ -15,7 +15,7 @@ var
   readyTasks = initDeque[Task]()
   currentTask {.exportc.}: Task
 
-proc getCurrentTask*(): var Task = currentTask
+proc getCurrentTask*(): Task = currentTask
 
 proc addTask*(t: Task) =
   readyTasks.addLast(t)

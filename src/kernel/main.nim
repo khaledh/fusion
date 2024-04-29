@@ -11,7 +11,7 @@ import gdt
 import pmm
 import sched
 import syscalls
-import tasks
+import taskmgr
 import timer
 import vmm
 
@@ -47,47 +47,52 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   debugln "kernel: Initializing IDT"
   idtInit()
 
-  debugln "kernel: Initializing LAPIC "
-  let lapicPhysAddr = lapic.getBasePhysAddr()
-  let lapicFrameAddr = lapicPhysAddr - (lapicPhysAddr mod PageSize)
-  # map LAPIC frame into virtual memory
-  let lapicVMRegion = vmalloc(kspace, 1)
-  mapRegion(
-    pml4 = getActivePML4(),
-    virtAddr = lapicVMRegion.start,
-    physAddr = lapicFrameAddr.PhysAddr,
-    pageCount = 1,
-    pageAccess = paReadWrite,
-    pageMode = pmSupervisor,
-    noExec = true
-  )
-  lapicInit(lapicVMRegion.start.uint64)
-
-
-  debugln "kernel: Initializing timer"
-  timerInit()
+  # debugln "kernel: Initializing LAPIC "
+  # let lapicPhysAddr = lapic.getBasePhysAddr()
+  # let lapicFrameAddr = lapicPhysAddr - (lapicPhysAddr mod PageSize)
+  # # map LAPIC frame into virtual memory
+  # let lapicVMRegion = vmalloc(kspace, 1)
+  # mapRegion(
+  #   pml4 = getActivePML4(),
+  #   virtAddr = lapicVMRegion.start,
+  #   physAddr = lapicFrameAddr.PhysAddr,
+  #   pageCount = 1,
+  #   pageAccess = paReadWrite,
+  #   pageMode = pmSupervisor,
+  #   noExec = true
+  # )
+  # lapicInit(lapicVMRegion.start.uint64)
+# 
+# 
+  # debugln "kernel: Initializing timer"
+  # timerInit()
 
   debugln "kernel: Initializing Syscalls"
   syscallInit()
 
-  debugln "kernel: Creating user tasks"
-  var task1 = createTask(
+  debugln "kernel: Creating tasks"
+
+  proc khello() {.cdecl.} =
+    debugln "Hello from kernel!"
+    schedule()  # yield
+    debugln "Bye from kernel!"
+  
+  let ktask = createKernelTask(khello)
+
+  var utask1 = createTask(
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
     imagePageCount = bootInfo.userImagePages,
   )
-  var task2 = createTask(
-    imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
-    imagePageCount = bootInfo.userImagePages,
-  )
-  var task3 = createTask(
+  var utask2 = createTask(
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
     imagePageCount = bootInfo.userImagePages,
   )
 
   debugln "kernel: Adding tasks to scheduler"
-  sched.addTask(task1)
-  sched.addTask(task2)
-  sched.addTask(task3)
+  sched.addTask(ktask)
+  sched.addTask(utask1)
+  sched.addTask(utask2)
+
 
   debugln "kernel: Starting scheduler"
   sched.schedule()

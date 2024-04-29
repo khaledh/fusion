@@ -4,7 +4,7 @@
 
 import cpu
 import gdt
-import tasks
+import taskdef
 import vmm
 
 {.experimental: "codeReordering".}
@@ -16,29 +16,33 @@ proc switchTo*(next: var Task) =
   tss.rsp0 = next.kstack.bottom
   setActivePML4(next.pml4)
 
-  if not (currentTask.isNil or currentTask.state == TaskState.Terminated):
-    pushRegs()
-    asm """
-      mov %0, rsp
-      : "=m" (`currentTask`->rsp)
-    """
-
+  var oldTask = currentTask
   currentTask = next
+  currentTask.state = TaskState.Running
 
-  case next.state
-  of TaskState.New:
-    next.state = TaskState.Running
-    asm """
-      mov rsp, %0
-      iretq
-      :
-      : "m" (`currentTask`->rsp)
-    """
+  if oldTask.isNil or oldTask.state == TaskState.Terminated:
+    doBecome(currentTask)
   else:
-    next.state = TaskState.Running
-    asm """
-      mov rsp, %0
-      :
-      : "m" (`currentTask`->rsp)
-    """
-    popRegs()
+    doSwitch(oldTask, currentTask)
+
+proc doBecome(task: Task) {.asmNoStackFrame.} =
+  asm """
+    mov rsp, [rdi]
+    jmp resumeTask
+  """
+
+proc doSwitch(old: Task, new: Task) {.asmNoStackFrame.} =
+  pushRegs()
+  asm """
+    # switch stacks
+    mov [rdi], rsp
+    mov rsp, [rsi]
+    jmp resumeTask
+  """
+
+proc resumeTask() {.asmNoStackFrame, exportc.} =
+  popRegs()
+  asm """
+    sti
+    ret
+  """
