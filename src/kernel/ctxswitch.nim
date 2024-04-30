@@ -13,7 +13,9 @@ var
   currentTask {.importc.}: Task
 
 proc switchTo*(next: var Task) =
+  # set the TSS rsp0 to the new task's kernel stack
   tss.rsp0 = next.kstack.bottom
+  # activate the new task's page tables
   setActivePML4(next.pml4)
 
   var oldTask = currentTask
@@ -21,28 +23,25 @@ proc switchTo*(next: var Task) =
   currentTask.state = TaskState.Running
 
   if oldTask.isNil or oldTask.state == TaskState.Terminated:
-    doBecome(currentTask)
+    resume(currentTask)
   else:
-    doSwitch(oldTask, currentTask)
+    switch(oldTask, currentTask)
 
-proc doBecome(task: Task) {.asmNoStackFrame.} =
+proc resume(task: Task) {.asmNoStackFrame.} =
   asm """
     mov rsp, [rdi]
-    jmp resumeTask
+    jmp returnToTask
   """
 
-proc doSwitch(old: Task, new: Task) {.asmNoStackFrame.} =
+proc switch(old: Task, new: Task) {.asmNoStackFrame.} =
   pushRegs()
   asm """
     # switch stacks
     mov [rdi], rsp
     mov rsp, [rsi]
-    jmp resumeTask
+    jmp returnToTask
   """
 
-proc resumeTask() {.asmNoStackFrame, exportc.} =
+proc returnToTask() {.asmNoStackFrame, exportc.} =
   popRegs()
-  asm """
-    sti
-    ret
-  """
+  asm "ret"

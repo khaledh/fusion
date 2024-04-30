@@ -15,11 +15,14 @@ proc UserMain*() {.exportc.} =
   let tid = os.getTaskId()
 
   let hello = &"Hello from task {tid}"
-  print(hello.addr)
+  for i in 0..10:
+    print(hello.addr)
+    for j in 0..1000000:
+      discard
 
-  yld()
+  # yld()
 
-  let bye = &"Bye from task {tid}"
-  print(bye.addr)
+  # let bye = &"Bye from task {tid}"
+  # print(bye.addr)
 
   exit(0)

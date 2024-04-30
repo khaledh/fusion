@@ -35,6 +35,13 @@ proc writeMSR*(ecx: uint32, value: uint64) =
     : "c"(`ecx`), "a"(`eax`), "d"(`edx`)
   """
 
+proc idle*() {.cdecl.} =
+  while true:
+    debugln("********** idle **********")
+    asm """
+      hlt
+    """
+
 proc halt*() =
   asm """
   .loop:

@@ -23,8 +23,8 @@ proc addTask*(t: Task) =
 proc schedule*() =
   if readyTasks.len == 0:
     if currentTask.isNil or currentTask.state == Terminated:
-      debugln &"sched: no tasks to run, halting"
-      halt()
+      debugln &"sched: no tasks to run, idling..."
+      idle()
     else:
       # no ready tasks, keep running the current task
       return
@@ -37,9 +37,9 @@ proc schedule*() =
   # switch to the first task in the queue
   var nextTask = readyTasks.popFirst()
 
-  if currentTask.isNil:
-    debugln &"sched: switching -> {nextTask.id}"
-  else:
-    debugln &"sched: switching {currentTask.id} -> {nextTask.id}"
+  # if currentTask.isNil:
+  #   debugln &"sched: switching -> {nextTask.id}"
+  # else:
+  #   debugln &"sched: switching {currentTask.id} -> {nextTask.id}"
   
   switchTo(nextTask)

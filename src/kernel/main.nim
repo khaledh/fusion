@@ -2,8 +2,8 @@
   Fusion kernel
 ]#
 
-import common/[bootinfo, libc, malloc]
-import common/pagetables
+import common/[bootinfo, libc, malloc, pagetables]
+import cpu
 import debugcon
 import idt
 import lapic
@@ -47,37 +47,38 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   debugln "kernel: Initializing IDT"
   idtInit()
 
-  # debugln "kernel: Initializing LAPIC "
-  # let lapicPhysAddr = lapic.getBasePhysAddr()
-  # let lapicFrameAddr = lapicPhysAddr - (lapicPhysAddr mod PageSize)
-  # # map LAPIC frame into virtual memory
-  # let lapicVMRegion = vmalloc(kspace, 1)
-  # mapRegion(
-  #   pml4 = getActivePML4(),
-  #   virtAddr = lapicVMRegion.start,
-  #   physAddr = lapicFrameAddr.PhysAddr,
-  #   pageCount = 1,
-  #   pageAccess = paReadWrite,
-  #   pageMode = pmSupervisor,
-  #   noExec = true
-  # )
-  # lapicInit(lapicVMRegion.start.uint64)
-# 
-# 
-  # debugln "kernel: Initializing timer"
-  # timerInit()
+  debugln "kernel: Initializing LAPIC "
+  let lapicPhysAddr = lapic.getBasePhysAddr()
+  let lapicFrameAddr = lapicPhysAddr - (lapicPhysAddr mod PageSize)
+  # map LAPIC frame into virtual memory
+  let lapicVMRegion = vmalloc(kspace, 1)
+  mapRegion(
+    pml4 = getActivePML4(),
+    virtAddr = lapicVMRegion.start,
+    physAddr = lapicFrameAddr.PhysAddr,
+    pageCount = 1,
+    pageAccess = paReadWrite,
+    pageMode = pmSupervisor,
+    noExec = true
+  )
+  lapicInit(lapicVMRegion.start.uint64)
+  
+  debugln "kernel: Initializing timer"
+  timerInit()
 
   debugln "kernel: Initializing Syscalls"
   syscallInit()
 
   debugln "kernel: Creating tasks"
 
-  proc khello() {.cdecl.} =
-    debugln "Hello from kernel!"
-    schedule()  # yield
-    debugln "Bye from kernel!"
+  # let kidle = createKernelTask(cpu.idle)
+
+  # proc khello() {.cdecl.} =
+  #   debugln "Hello from kernel!"
+  #   schedule()  # yield
+  #   debugln "Bye from kernel!"
   
-  let ktask = createKernelTask(khello)
+  # let ktask = createKernelTask(khello)
 
   var utask1 = createTask(
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
@@ -89,7 +90,8 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   )
 
   debugln "kernel: Adding tasks to scheduler"
-  sched.addTask(ktask)
+  # sched.addTask(kidle)
+  # sched.addTask(ktask)
   sched.addTask(utask1)
   sched.addTask(utask2)
 

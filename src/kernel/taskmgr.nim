@@ -3,7 +3,6 @@
 ]#
 
 import common/pagetables
-import cpu
 import debugcon
 import loader
 import gdt
@@ -47,13 +46,13 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   debugln &"tasks: Loaded task at: {loadedImage.vmRegion.start.uint64:#x}"
 
   # map kernel space
-  debugln &"tasks: Mapping kernel space in task's page table"
+  # debugln &"tasks: Mapping kernel space in task's page table"
   var kpml4 = getActivePML4()
   for i in 256 ..< 512:
     result.pml4.entries[i] = kpml4.entries[i]
 
   # create user and kernel stacks
-  debugln &"tasks: Creating task stacks"
+  # debugln &"tasks: Creating task stacks"
   let ustack = createStack(result, uspace, 1, pmUser)
   let kstack = createStack(result, kspace, 1, pmSupervisor)
 
@@ -76,7 +75,7 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   #    rsp --> | r15               |
   #            +-------------------+
   #
-  debugln &"tasks: Setting up interrupt stack frame"
+  # debugln &"tasks: Setting up interrupt stack frame"
   let isfAddr = kstack.bottom - sizeof(InterruptStackFrame).uint64
   var isf = cast[ptr InterruptStackFrame](isfAddr)
   isf.ss = cast[uint64](DataSegmentSelector)
@@ -85,12 +84,12 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   isf.cs = cast[uint64](UserCodeSegmentSelector)
   isf.rip = cast[uint64](loadedImage.entryPoint)
 
-  debugln &"tasks: Setting up iretq proc ptr"
+  # debugln &"tasks: Setting up iretq proc ptr"
   let iretqPtrAddr = isfAddr - sizeof(uint64).uint64
   var iretqPtr = cast[ptr uint64](iretqPtrAddr)
   iretqPtr[] = cast[uint64](iretq)
 
-  debugln &"tasks: Setting up task registers"
+  # debugln &"tasks: Setting up task registers"
   let regsAddr = iretqPtrAddr - sizeof(TaskRegs).uint64
   var regs = cast[ptr TaskRegs](regsAddr)
   zeroMem(regs, sizeof(TaskRegs))
@@ -145,7 +144,7 @@ proc createKernelTask*(kproc: KernelProc): Task =
   #    rsp --> | r15               |
   #            +-------------------+
   #
-  debugln &"tasks: Setting up stack frame"
+  # debugln &"tasks: Setting up stack frame"
   let ripAddr = kstack.bottom - sizeof(uint64).uint64
   var rip = cast[ptr uint64](ripAddr)
   rip[] = cast[uint64](kernelTaskWrapper)
@@ -158,7 +157,6 @@ proc createKernelTask*(kproc: KernelProc): Task =
   result.id = taskId
   result.kstack = kstack
   result.rsp = regsAddr
-  debugln &"tasks: task rsp: {result.rsp.uint64:#x}"
   result.state = TaskState.New
 
   debugln &"tasks: Created kernel task {taskId}"

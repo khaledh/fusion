@@ -72,7 +72,7 @@ type
     DivideBy1   = 0b1011
 
 const
-  InitialCount = 100_000
+  InitialCount = 500_000
 
 proc setTimer*(vector: uint8) =
   writeRegister(LapicOffset.TimerDivideConfig, DivideBy16.uint32)

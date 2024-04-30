@@ -41,7 +41,7 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
         raise newException(LoaderError, &"Unsupported alignment {ph.align:#x} for segment {i}")
       let region = VMRegion(
         start: VirtAddr(ph.vaddr - (ph.vaddr mod PageSize)),
-        npages: (ph.memsz + PageSize - 1) div PageSize,
+        npages: (ph.memsz + PageSize - 1) div PageSize + 1,
         flags: cast[VMRegionFlags](ph.flags),
       )
       vmRegions.add(region)
@@ -59,13 +59,14 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
 
   # allocate a single contiguous region for the user image
   let vmRegion = vmalloc(uspace, pageCount)
-  debugln &"loader: Allocated {vmRegion.npages} pages at {vmRegion.start.uint64:#x}"
+  # debugln &"loader: Allocated {vmRegion.npages} pages at {vmRegion.start.uint64:#x}"
 
   # adjust the individual regions' start addresses based on vmRegion.start
   for region in vmRegions.mitems:
     region.start = vmRegion.start +! region.start.uint64
 
   # map each region into the page tables, making sure to set the R/W and NX flags as needed
+  # debugln "loader: Mapping user image"
   var kpml4 = getActivePML4()
   for region in vmRegions:
     let access = if region.flags.contains(Write): paReadWrite else: paRead
@@ -83,29 +84,33 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
     )
 
   # copy loadable segments from the image to the user memory
+  # debugln "loader: Copying segments"
   for (i, ph) in segments(image):
     if ph.type != ElfProgramHeaderType.Load:
       continue
     let dest = cast[pointer](vmRegion.start +! ph.vaddr)
     let src = cast[pointer](imagePtr +! ph.offset)
+    # debugln &"  Segment {i}: copying {ph.filesz} bytes from {ph.offset:#x} to {ph.vaddr:#x}"
     copyMem(dest, src, ph.filesz)
     if ph.filesz < ph.memsz:
+      # debugln &"  Segment {i}: zeroing {ph.memsz - ph.filesz} bytes"
       zeroMem(cast[pointer](cast[uint64](dest) + ph.filesz), ph.memsz - ph.filesz)
 
   # apply relocations
+  # debugln "loader: Applying relocations"
   applyRelocations(
     image = cast[ptr UncheckedArray[byte]](vmRegion.start),
     dynOffset = cast[uint64](dynOffset),
   )
 
   # unmap the user image from kernel space
-  debugln "loader: Unmapping user image from kernel space"
+  # debugln "loader: Unmapping user image from kernel space"
   for region in vmRegions:
     unmapRegion(kpml4, region.start, region.npages)
 
   result.vmRegion = vmRegion
   result.entryPoint = cast[pointer](vmRegion.start +! image.header.entry)
-  debugln &"loader: Entry point: {cast[uint64](result.entryPoint):#x}"
+  # debugln &"loader: Entry point: {cast[uint64](result.entryPoint):#x}"
 
 ####################################################################################################
 ## Relocation
@@ -187,4 +192,4 @@ proc applyRelocations(image: ptr UncheckedArray[byte], dynOffset: uint64) =
     target[] = value
     inc appliedCount
 
-  debugln &"loader: Applied {appliedCount} relocations"
+  # debugln &"loader: Applied {appliedCount} relocations"
