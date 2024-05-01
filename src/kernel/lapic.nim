@@ -1,3 +1,7 @@
+#[
+  x86_64 Local APIC
+]#
+
 import cpu
 
 type

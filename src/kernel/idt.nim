@@ -2,7 +2,6 @@
   x86_64 Interrupt Descriptor Table (IDT)
 ]#
 
-import debugcon
 import gdt
 
 type
@@ -82,6 +81,7 @@ createHandler(cpuInvalidTssHandler, "Invalid TSS")
 createHandler(cpuSegmentNotPresentHandler, "Segment Not Present")
 createHandler(cpuStackSegmentFaultHandler, "Stack Segment Fault")
 createHandler(cpuGeneralProtectionFaultHandler, "General Protection Fault")
+# page fault is handled separately
 createHandler(cpuX87FloatingPointErrorHandler, "x87 Floating Point Error")
 createHandler(cpuAlignmentCheckHandler, "Alignment Check")
 createHandler(cpuMachineCheckHandler, "Machine Check")

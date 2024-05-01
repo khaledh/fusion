@@ -1,5 +1,5 @@
 #[
-  Context switching
+  Low-level context switching
 ]#
 
 import cpu

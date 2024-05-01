@@ -2,7 +2,6 @@
   System calls
 ]#
 
-import debugcon
 import cpu
 import gdt
 import sched

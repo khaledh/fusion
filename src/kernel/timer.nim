@@ -1,3 +1,7 @@
+#[
+  Timer interrupt handler
+]#
+
 import idt
 import lapic
 import sched

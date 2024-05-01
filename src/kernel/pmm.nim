@@ -3,7 +3,6 @@
 ]#
 
 import common/bootinfo
-import debugcon
 
 const
   FrameSize = 4096

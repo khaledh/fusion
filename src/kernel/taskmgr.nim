@@ -3,7 +3,6 @@
 ]#
 
 import common/pagetables
-import debugcon
 import loader
 import gdt
 import sched

@@ -1,5 +1,5 @@
 #[
-  Fusion kernel system call numbers
+  System call definitions
 ]#
 
 const

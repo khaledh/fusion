@@ -1,5 +1,5 @@
 #[
-  Fusion kernel OS library functions
+  OS library functions
 ]#
 
 include syscalldef

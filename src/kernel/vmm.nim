@@ -6,7 +6,6 @@ import std/algorithm
 
 import common/pagetables
 import pmm
-import debugcon
 
 {.experimental: "codeReordering".}
 
@@ -29,13 +28,7 @@ type
     maxAddress*: VirtAddr
     regions*: seq[VMRegion]
 
-  # VMAllocType* = enum
-  #   AnyAddress
-  #   MaxAddress
-  #   ExactAddress
-
   OutOfMemoryError* = object of CatchableError
-
 
 const
   KernelSpaceMinAddress* = 0xffff800000000000'u64.VirtAddr

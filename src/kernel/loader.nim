@@ -5,7 +5,6 @@
 import std/algorithm
 
 import common/pagetables
-import debugcon
 import vmm
 
 include elf
@@ -39,9 +38,12 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
     if ph.type == ElfProgramHeaderType.Load:
       if ph.align != PageSize:
         raise newException(LoaderError, &"Unsupported alignment {ph.align:#x} for segment {i}")
+      let startOffset = ph.vaddr mod PageSize
+      let startPage = ph.vaddr - startOffset
+      let numPages = (startOffset + ph.memsz + PageSize - 1) div PageSize
       let region = VMRegion(
-        start: VirtAddr(ph.vaddr - (ph.vaddr mod PageSize)),
-        npages: (ph.memsz + PageSize - 1) div PageSize + 1,
+        start: startPage.VirtAddr,
+        npages: numPages,
         flags: cast[VMRegionFlags](ph.flags),
       )
       vmRegions.add(region)

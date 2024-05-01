@@ -3,8 +3,6 @@
 ]#
 
 import common/[bootinfo, libc, malloc, pagetables]
-import cpu
-import debugcon
 import idt
 import lapic
 import gdt

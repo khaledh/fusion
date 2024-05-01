@@ -6,7 +6,6 @@ import std/deques
 
 import cpu
 import ctxswitch
-import debugcon
 import taskdef
 
 {.experimental: "codeReordering".}
