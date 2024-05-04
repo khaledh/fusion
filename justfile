@@ -26,6 +26,8 @@ kernel:
 user:
   nim c {{nimflags}} --out:build/user/{{user_out}} {{user_nim}}
 
+build: bootloader kernel user
+
 run *QEMU_ARGS: bootloader kernel user
   mkdir -p {{disk_image_dir}}/efi/boot
   mkdir -p {{disk_image_dir}}/efi/fusion
