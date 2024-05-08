@@ -19,18 +19,10 @@ type
 
 proc applyRelocations(image: ptr UncheckedArray[byte], dynOffset: uint64)
 
-proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
-  let imagePtr = cast[ptr byte](p2v(imagePhysAddr))
+proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
   let image = initElfImage(imagePtr)
 
   var dynOffset: int = -1
-  for (_, sh) in sections(image):
-    if sh.type == ElfSectionType.Dynamic:
-      # debugln &"  Dynamic section found at {sh.offset:#x}"
-      dynOffset = cast[int](sh.vaddr)
-
-  if dynOffset == -1:
-    raise newException(LoaderError, "No dynamic section found")
 
   # get a list of page-aligned memory regions to be mapped
   var vmRegions: seq[VMRegion] = @[]
@@ -47,6 +39,9 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
         flags: cast[VMRegionFlags](ph.flags),
       )
       vmRegions.add(region)
+    elif ph.type == ElfProgramHeaderType.Dynamic:
+      # debugln &"  Dynamic segment found at {ph.offset:#x}"
+      dynOffset = cast[int](ph.vaddr)
 
   if vmRegions.len == 0:
     raise newException(LoaderError, "No loadable segments found")
@@ -54,18 +49,21 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
   if vmRegions[0].start.uint64 != 0:
     raise newException(LoaderError, "Expecting a PIE binary with a base address of 0")
 
+  if dynOffset == -1:
+    raise newException(LoaderError, "No dynamic section found")
+
   # calculate total memory size
   vmRegions = vmRegions.sortedByIt(it.start)
   let memSize = vmRegions[^1].end -! vmRegions[0].start
   let pageCount = (memSize + PageSize - 1) div PageSize
 
   # allocate a single contiguous region for the user image
-  let vmRegion = vmalloc(uspace, pageCount)
-  # debugln &"loader: Allocated {vmRegion.npages} pages at {vmRegion.start.uint64:#x}"
+  let taskRegion = vmalloc(uspace, pageCount)
+  # debugln &"loader: Allocated {taskRegion.npages} pages at {taskRegion.start.uint64:#x}"
 
-  # adjust the individual regions' start addresses based on vmRegion.start
+  # adjust the individual regions' start addresses based on taskRegion.start
   for region in vmRegions.mitems:
-    region.start = vmRegion.start +! region.start.uint64
+    region.start = taskRegion.start +! region.start.uint64
 
   # map each region into the page tables, making sure to set the R/W and NX flags as needed
   # debugln "loader: Mapping user image"
@@ -90,7 +88,7 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
   for (i, ph) in segments(image):
     if ph.type != ElfProgramHeaderType.Load:
       continue
-    let dest = cast[pointer](vmRegion.start +! ph.vaddr)
+    let dest = cast[pointer](taskRegion.start +! ph.vaddr)
     let src = cast[pointer](imagePtr +! ph.offset)
     # debugln &"  Segment {i}: copying {ph.filesz} bytes from {ph.offset:#x} to {ph.vaddr:#x}"
     copyMem(dest, src, ph.filesz)
@@ -101,7 +99,7 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
   # apply relocations
   # debugln "loader: Applying relocations"
   applyRelocations(
-    image = cast[ptr UncheckedArray[byte]](vmRegion.start),
+    image = cast[ptr UncheckedArray[byte]](taskRegion.start),
     dynOffset = cast[uint64](dynOffset),
   )
 
@@ -110,8 +108,10 @@ proc load*(imagePhysAddr: PhysAddr, pml4: ptr PML4Table): LoadedElfImage =
   for region in vmRegions:
     unmapRegion(kpml4, region.start, region.npages)
 
-  result.vmRegion = vmRegion
-  result.entryPoint = cast[pointer](vmRegion.start +! image.header.entry)
+  result = LoadedElfImage(
+    vmRegion: taskRegion,
+    entryPoint: cast[pointer](taskRegion.start +! image.header.entry)
+  )
   # debugln &"loader: Entry point: {cast[uint64](result.entryPoint):#x}"
 
 ####################################################################################################

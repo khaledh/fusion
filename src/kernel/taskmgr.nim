@@ -40,7 +40,8 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   result.pml4 = cast[ptr PML4Table](new PML4Table)
 
   debugln &"tasks: Loading task from ELF image"
-  let loadedImage = load(imagePhysAddr, result.pml4)
+  let imagePtr = cast[pointer](p2v(imagePhysAddr))
+  let loadedImage = load(imagePtr, result.pml4)
   result.vmRegions.add(loadedImage.vmRegion)
   debugln &"tasks: Loaded task at: {loadedImage.vmRegion.start.uint64:#x}"
 

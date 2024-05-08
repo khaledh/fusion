@@ -47,7 +47,7 @@ proc createVirtualMemoryMap(
   physMemoryPages: uint64,
 ): seq[MemoryMapEntry]
 
-proc createBootInfo(
+proc initBootInfo(
   bootInfoBase: uint64,
   physMemoryPages: uint64,
   physMemoryMap: seq[MemoryMapEntry],
@@ -57,7 +57,7 @@ proc createBootInfo(
   kernelStackPages: uint64,
   userImageBase: uint64,
   userImagePages: uint64,
-): ptr BootInfo
+)
 
 proc createPageTable(
   bootloaderBase: uint64,
@@ -235,7 +235,7 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
   let virtMemoryMap = createVirtualMemoryMap(kernelImagePages, physMemoryPages)
 
   debugln &"boot: Preparing BootInfo"
-  let bootInfo = createBootInfo(
+  initBootInfo(
     bootInfoBase,
     physMemoryPages,
     physMemoryMap,
@@ -413,7 +413,7 @@ proc createVirtualMemoryMap(
 # BootInfo utilities
 ####################################################################################################
 
-proc createBootInfo(
+proc initBootInfo(
   bootInfoBase: uint64,
   physMemoryPages: uint64,
   physMemoryMap: seq[MemoryMapEntry],
@@ -423,7 +423,7 @@ proc createBootInfo(
   kernelStackPages: uint64,
   userImageBase: uint64,
   userImagePages: uint64,
-): ptr BootInfo =
+) =
   var bootInfo = cast[ptr BootInfo](bootInfoBase)
   bootInfo.physicalMemoryVirtualBase = PhysicalMemoryVirtualBase
 
@@ -452,8 +452,6 @@ proc createBootInfo(
 
   bootInfo.userImagePhysicalBase = userImageBase
   bootInfo.userImagePages = userImagePages
-
-  result = bootInfo
 
 ####################################################################################################
 # Page table mapping

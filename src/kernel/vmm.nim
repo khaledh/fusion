@@ -21,7 +21,7 @@ type
     Execute = (0, "E")
     Write   = (1, "W")
     Read    = (2, "R")
-  VMRegionFlags* = set[VMRegionFlag]
+  VMRegionFlags* {.size: sizeof(uint32).} = set[VMRegionFlag]
 
   VMAddressSpace* = object
     minAddress*: VirtAddr

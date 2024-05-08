@@ -53,8 +53,8 @@ proc overlaps(region1, region2: PMRegion): bool =
     r1 = region2
     r2 = region1
   result = (
-    r1.start.PhysAddr < endAddr(r2.start.PhysAddr, r2.nframes) and
-    r2.start.PhysAddr < endAddr(r1.start.PhysAddr, r1.nframes)
+    r1.start < endAddr(r2.start, r2.nframes) and
+    r2.start < endAddr(r1.start, r1.nframes)
   )
 
 proc pmInit*(physMemoryVirtualBase: uint64, memoryMap: MemoryMap) =
