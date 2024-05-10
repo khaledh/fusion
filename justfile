@@ -3,6 +3,14 @@ nimflags := (
   if os() == "macos" { " -d:macosx" } else { "" }
 )
 
+export PATH := (
+  if os() == "macos" {
+    `brew --prefix llvm` + "/bin:" + env_var('PATH')
+  } else {
+    env_var('PATH')
+  }
+)
+
 boot_nim := "src/boot/bootx64.nim"
 boot_out := "bootx64.efi"
 
