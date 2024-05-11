@@ -22,7 +22,15 @@ type
     limit: uint16
     base: pointer
 
-  InterruptHandler = proc (frame: pointer) {.cdecl.}
+  InterruptHandler = proc (frame: ptr InterruptFrame) {.cdecl.}
+  InterruptHandlerWithErrorCode = proc (frame: ptr InterruptFrame, errorCode: uint64) {.cdecl.}
+
+  InterruptFrame* {.packed.} = object
+    ip*: uint64
+    cs*: uint64
+    flags*: uint64
+    sp*: uint64
+    ss*: uint64
 
 var
   idtEntries: array[256, InterruptGate]
@@ -33,7 +41,7 @@ let
     base: idtEntries.addr
   )
 
-proc newInterruptGate(handler: InterruptHandler, dpl: uint8 = 0): InterruptGate =
+proc newInterruptGate(handler: pointer, dpl: uint8 = 0): InterruptGate =
   let offset = cast[uint64](handler)
   result = InterruptGate(
     offset00: uint16(offset),
@@ -45,9 +53,13 @@ proc newInterruptGate(handler: InterruptHandler, dpl: uint8 = 0): InterruptGate 
 proc installHandler*(vector: uint8, handler: InterruptHandler, dpl: uint8 = 0) =
   idtEntries[vector] = newInterruptGate(handler, dpl)
 
-proc cpuPageFaultHandler*(frame: pointer) {.cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#".} =
+proc installHandlerWithErrorCode*(vector: uint8, handler: InterruptHandlerWithErrorCode, dpl: uint8 = 0) =
+  idtEntries[vector] = newInterruptGate(handler, dpl)
+
+proc cpuPageFaultHandler*(frame: ptr InterruptFrame, errorCode: uint64)
+  {.cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#".} =
   debugln ""
-  debugln "CPU Exception: Page Fault"
+  debugln &"CPU Exception: Page Fault (Error Code: {errorCode:#x})"
   # get the faulting address
   var cr2: uint64
   asm """
@@ -59,10 +71,35 @@ proc cpuPageFaultHandler*(frame: pointer) {.cdecl, codegenDecl: "__attribute__ (
   debugln getStackTrace()
   quit()
 
+proc cpuGeneralProtectionFaultHandler*(frame: ptr InterruptFrame, errorCode: uint64)
+  {.cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#".} =
+  debugln ""
+  debugln &"CPU Exception: General Protection Fault (Error Code: {errorCode:#x})"
+  debugln ""
+  debugln "  Interrupt Frame:"
+  debugln &"    IP: {frame.ip:#018x}"
+  debugln &"    CS: {frame.cs:#018x}"
+  debugln &"    Flags: {frame.flags:#018x}"
+  debugln &"    SP: {frame.sp:#018x}"
+  debugln &"    SS: {frame.ss:#018x}"
+  debugln ""
+  debugln getStackTrace()
+  quit()
+
+
 template createHandler*(name: untyped, msg: string) =
-  proc name*(frame: pointer) {.cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#".} =
+  proc name*(frame: ptr InterruptFrame) {.cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#".} =
     debugln ""
     debugln "CPU Exception: ", msg
+    debugln ""
+    debugln getStackTrace()
+    quit()
+
+template createHandlerWithErrorCode*(name: untyped, msg: string) =
+  proc name*(frame: ptr InterruptFrame, errorCode: uint64)
+    {.cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#".} =
+    debugln ""
+    debugln &"CPU Exception: ", msg, " (Error Code: {errorCode})"
     debugln ""
     debugln getStackTrace()
     quit()
@@ -75,19 +112,19 @@ createHandler(cpuOverflowHandler, "Overflow")
 createHandler(cpuBoundRangeExceededHandler, "Bound Range Exceeded")
 createHandler(cpuInvalidOpcodeHandler, "Invalid Opcode")
 createHandler(cpuDeviceNotAvailableHandler, "Device Not Available")
-createHandler(cpuDoubleFaultHandler, "Double Fault")
+createHandlerWithErrorCode(cpuDoubleFaultHandler, "Double Fault")
 createHandler(cpuCoprocessorSegmentOverrunHandler, "Coprocessor Segment Overrun")
 createHandler(cpuInvalidTssHandler, "Invalid TSS")
-createHandler(cpuSegmentNotPresentHandler, "Segment Not Present")
-createHandler(cpuStackSegmentFaultHandler, "Stack Segment Fault")
-createHandler(cpuGeneralProtectionFaultHandler, "General Protection Fault")
-# page fault is handled separately
+createHandlerWithErrorCode(cpuSegmentNotPresentHandler, "Segment Not Present")
+createHandlerWithErrorCode(cpuStackSegmentFaultHandler, "Stack Segment Fault")
+# General Protection Fault is handled separately
+# Page Fault is handled separately
 createHandler(cpuX87FloatingPointErrorHandler, "x87 Floating Point Error")
-createHandler(cpuAlignmentCheckHandler, "Alignment Check")
+createHandlerWithErrorCode(cpuAlignmentCheckHandler, "Alignment Check")
 createHandler(cpuMachineCheckHandler, "Machine Check")
 createHandler(cpuSimdFloatingPointExceptionHandler, "SIMD Floating Point Exception")
 createHandler(cpuVirtualizationExceptionHandler, "Virtualization Exception")
-createHandler(cpuControlProtectionExceptionHandler, "Control Protection Exception")
+createHandlerWithErrorCode(cpuControlProtectionExceptionHandler, "Control Protection Exception")
 
 proc idtInit*() =
   installHandler(0, cpuDivideErrorHandler)
@@ -98,19 +135,19 @@ proc idtInit*() =
   installHandler(5, cpuBoundRangeExceededHandler)
   installHandler(6, cpuInvalidOpcodeHandler)
   installHandler(7, cpuDeviceNotAvailableHandler)
-  installHandler(8, cpuDoubleFaultHandler)
+  installHandlerWithErrorCode(8, cpuDoubleFaultHandler)
   installHandler(9, cpuCoprocessorSegmentOverrunHandler)
   installHandler(10, cpuInvalidTssHandler)
-  installHandler(11, cpuSegmentNotPresentHandler)
-  installHandler(12, cpuStackSegmentFaultHandler)
-  installHandler(13, cpuGeneralProtectionFaultHandler)
-  installHandler(14, cpuPageFaultHandler)
+  installHandlerWithErrorCode(11, cpuSegmentNotPresentHandler)
+  installHandlerWithErrorCode(12, cpuStackSegmentFaultHandler)
+  installHandlerWithErrorCode(13, cpuGeneralProtectionFaultHandler)
+  installHandlerWithErrorCode(14, cpuPageFaultHandler)
   installHandler(16, cpuX87FloatingPointErrorHandler)
-  installHandler(17, cpuAlignmentCheckHandler)
+  installHandlerWithErrorCode(17, cpuAlignmentCheckHandler)
   installHandler(18, cpuMachineCheckHandler)
   installHandler(19, cpuSimdFloatingPointExceptionHandler)
   installHandler(20, cpuVirtualizationExceptionHandler)
-  installHandler(21, cpuControlProtectionExceptionHandler)
+  installHandlerWithErrorCode(21, cpuControlProtectionExceptionHandler)
 
   asm """
     lidt %0

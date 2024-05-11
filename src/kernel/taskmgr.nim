@@ -17,8 +17,8 @@ var
 
 proc iretq*() {.asmNoStackFrame.} =
   ## We push the address of this proc after the interrupt stack frame so that a simple
-  ## `ret` instruction will execute this proc, which then returns to user mode. This
-  ## makes returning from both user and kernel mode consistent using a `ret` instruction.
+  ## `ret` instruction will execute this proc, which then returns to the new task. This
+  ## makes returning from both new and interrupted tasks the same.
   asm "iretq"
 
 proc createStack*(task: var Task, space: var VMAddressSpace, npages: uint64, mode: PageMode): TaskStack =
@@ -29,7 +29,31 @@ proc createStack*(task: var Task, space: var VMAddressSpace, npages: uint64, mod
   result.size = npages * PageSize
   result.bottom = cast[uint64](result.data) + result.size
 
-proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
+# task initial stack frame
+#
+# stack
+# bottom --> +-------------------+
+#            | ss                |
+#            | rsp               |
+#            | rflags            | <-- `InterruptStackFrame` (pushed/popped by cpu)
+#            | cs                |
+#            | rip               |
+#            +-------------------+
+#            | iretq proc ptr    | <-- `ret` instruction will pop this into `rip`, which
+#            +-------------------+     will execute `iretq`
+#            | rax               |
+#            | ...               |
+#            | ...               | <-- `TaskRegs` (pushed/popped by kernel)
+#            | ...               |
+#    rsp --> | r15               |
+#            +-------------------+
+#
+
+proc createUserTask*(
+  imagePhysAddr: PhysAddr,
+  imagePageCount: uint64,
+  priority: TaskPriority = 0
+): Task =
   new(result)
 
   let taskId = nextId
@@ -57,24 +81,7 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   let kstack = createStack(result, kspace, 1, pmSupervisor)
 
   # create stack frame
-  #
-  # stack
-  # bottom --> +-------------------+
-  #            | ss                |
-  #            | rsp               |
-  #            | rflags            | <-- `InterruptStackFrame` (pushed/popped by cpu)
-  #            | cs                |
-  #            | rip               |
-  #            +-------------------+
-  #            | iretq proc ptr    | <-- `ret` instruction will pop this into `rip`, which
-  #            +-------------------+     will execute `iretq`
-  #            | rax               |
-  #            | ...               |
-  #            | ...               | <-- `TaskRegs` (pushed/popped by kernel)
-  #            | ...               |
-  #    rsp --> | r15               |
-  #            +-------------------+
-  #
+
   # debugln &"tasks: Setting up interrupt stack frame"
   let isfAddr = kstack.bottom - sizeof(InterruptStackFrame).uint64
   var isf = cast[ptr InterruptStackFrame](isfAddr)
@@ -95,6 +102,7 @@ proc createTask*(imagePhysAddr: PhysAddr, imagePageCount: uint64): Task =
   zeroMem(regs, sizeof(TaskRegs))
 
   result.id = taskId
+  result.priority = priority
   result.ustack = ustack
   result.kstack = kstack
   result.rsp = regsAddr
@@ -114,11 +122,12 @@ type
   KernelProc* = proc () {.cdecl.}
 
 proc kernelTaskWrapper*(kproc: KernelProc) =
+  debugln &"tasks: Running kernel task"
   kproc()
   terminateTask(getCurrentTask())
   schedule()
 
-proc createKernelTask*(kproc: KernelProc): Task =
+proc createKernelTask*(kproc: KernelProc, priority: TaskPriority = 0): Task =
   new(result)
 
   let taskId = nextId
@@ -132,29 +141,29 @@ proc createKernelTask*(kproc: KernelProc): Task =
   let kstack = createStack(result, kspace, 1, pmSupervisor)
 
   # create stack frame
-  #
-  # stack
-  # bottom --> +-------------------+
-  #            | wrapper proc ptr  | <-- `ret` instruction will pop this into `rip`, which
-  #            +-------------------+     will execute `kernelTaskWrapper`, which will call
-  #            | rax               |     the kernel proc (passed as 1st argument in `rdi`)
-  #            | ...               |
-  #            | rdi (kproc ptr)   | <-- `TaskRegs` (pushed/popped by kernel)
-  #            | ...               |
-  #    rsp --> | r15               |
-  #            +-------------------+
-  #
-  # debugln &"tasks: Setting up stack frame"
-  let ripAddr = kstack.bottom - sizeof(uint64).uint64
-  var rip = cast[ptr uint64](ripAddr)
-  rip[] = cast[uint64](kernelTaskWrapper)
 
-  let regsAddr = ripAddr - sizeof(TaskRegs).uint64
+  # debugln &"tasks: Setting up interrupt stack frame"
+  let isfAddr = kstack.bottom - sizeof(InterruptStackFrame).uint64
+  var isf = cast[ptr InterruptStackFrame](isfAddr)
+  isf.ss = 0  # kernel ss selector must be null
+  isf.rsp = cast[uint64](kstack.bottom)
+  isf.rflags = cast[uint64](0x202)
+  isf.cs = cast[uint64](KernelCodeSegmentSelector)
+  isf.rip = cast[uint64](kernelTaskWrapper)
+
+  # debugln &"tasks: Setting up iretq proc ptr"
+  let iretqPtrAddr = isfAddr - sizeof(uint64).uint64
+  var iretqPtr = cast[ptr uint64](iretqPtrAddr)
+  iretqPtr[] = cast[uint64](iretq)
+
+  # debugln &"tasks: Setting up task registers"
+  let regsAddr = iretqPtrAddr - sizeof(TaskRegs).uint64
   var regs = cast[ptr TaskRegs](regsAddr)
   zeroMem(regs, sizeof(TaskRegs))
-  regs.rdi = cast[uint64](kproc)
+  regs.rdi = cast[uint64](kproc)  # pass kproc as an argument to kernelTaskWrapper
 
   result.id = taskId
+  result.priority = priority
   result.kstack = kstack
   result.rsp = regsAddr
   result.state = TaskState.New

@@ -3,12 +3,14 @@
 ]#
 
 import common/[bootinfo, libc, malloc, pagetables]
+import cpu
 import idt
 import lapic
 import gdt
 import pmm
 import sched
 import syscalls
+import taskdef
 import taskmgr
 import timer
 import vmm
@@ -16,6 +18,10 @@ import vmm
 proc NimMain() {.importc.}
 proc KernelMainInner(bootInfo: ptr BootInfo)
 proc unhandledException*(e: ref Exception)
+
+####################################################################################################
+# Kernel entry point
+####################################################################################################
 
 proc KernelMain(bootInfo: ptr BootInfo) {.exportc.} =
   NimMain()
@@ -31,21 +37,21 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   debugln ""
   debugln "kernel: Fusion Kernel"
 
-  debugln "kernel: Initializing PMM"
+  debugln "kernel: Init PMM"
   pmInit(bootInfo.physicalMemoryVirtualBase, bootInfo.physicalMemoryMap)
 
-  debugln "kernel: Initializing VMM"
+  debugln "kernel: Init VMM"
   vmInit(bootInfo.physicalMemoryVirtualBase, pmm.pmAlloc)
   vmAddRegion(kspace, bootInfo.kernelImageVirtualBase.VirtAddr, bootInfo.kernelImagePages)
   vmAddRegion(kspace, bootInfo.kernelStackVirtualBase.VirtAddr, bootInfo.kernelStackPages)
 
-  debugln "kernel: Initializing GDT"
+  debugln "kernel: Init GDT"
   gdtInit()
 
-  debugln "kernel: Initializing IDT"
+  debugln "kernel: Init IDT"
   idtInit()
 
-  debugln "kernel: Initializing LAPIC "
+  debugln "kernel: Init LAPIC "
   let lapicPhysAddr = lapic.getBasePhysAddr()
   let lapicFrameAddr = lapicPhysAddr - (lapicPhysAddr mod PageSize)
   # map LAPIC frame into virtual memory
@@ -61,41 +67,36 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   )
   lapicInit(lapicVMRegion.start.uint64)
   
-  debugln "kernel: Initializing timer"
+  debugln "kernel: Init timer"
   timerInit()
 
-  debugln "kernel: Initializing Syscalls"
+  debugln "kernel: Init syscalls"
   syscallInit()
 
   debugln "kernel: Creating tasks"
 
-  # let kidle = createKernelTask(cpu.idle)
+  let idleTask = createKernelTask(cpu.idle, low(TaskPriority))
 
-  # proc khello() {.cdecl.} =
-  #   debugln "Hello from kernel!"
-  #   schedule()  # yield
-  #   debugln "Bye from kernel!"
-  
-  # let ktask = createKernelTask(khello)
-
-  var utask1 = createTask(
+  var utask1 = createUserTask(
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
     imagePageCount = bootInfo.userImagePages,
   )
-  var utask2 = createTask(
+  var utask2 = createUserTask(
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
     imagePageCount = bootInfo.userImagePages,
   )
 
   debugln "kernel: Adding tasks to scheduler"
-  # sched.addTask(kidle)
-  # sched.addTask(ktask)
+  sched.addTask(idleTask)
   sched.addTask(utask1)
   sched.addTask(utask2)
 
-
   debugln "kernel: Starting scheduler"
   sched.schedule()
+
+####################################################################################################
+# Report unhandled Nim exceptions
+####################################################################################################
 
 proc unhandledException*(e: ref Exception) =
   debugln ""

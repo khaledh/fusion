@@ -37,8 +37,8 @@ proc writeMSR*(ecx: uint32, value: uint64) =
 
 proc idle*() {.cdecl.} =
   while true:
-    debugln("********** idle **********")
     asm """
+      sti
       hlt
     """
 

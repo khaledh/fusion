@@ -14,6 +14,7 @@ type
   Task* = ref object
     rsp*: uint64  # must be first field (inline assembly in ctxswitch expects this)
     id*: uint64
+    priority*: TaskPriority
     state*: TaskState
     # user task fields
     vmRegions*: seq[VMRegion]
@@ -22,6 +23,8 @@ type
     kstack*: TaskStack
     isUser*: bool
   
+  TaskPriority* = range[-8..7]
+
   TaskState* = enum
     New
     Ready
