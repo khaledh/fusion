@@ -75,15 +75,17 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
 
   debugln "kernel: Creating tasks"
 
-  let idleTask = createKernelTask(cpu.idle, low(TaskPriority))
+  let idleTask = createKernelTask(cpu.idle, "idle", low(TaskPriority))
 
   var utask1 = createUserTask(
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
     imagePageCount = bootInfo.userImagePages,
+    name = "utask1",
   )
   var utask2 = createUserTask(
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
     imagePageCount = bootInfo.userImagePages,
+    name = "utask2",
   )
 
   debugln "kernel: Adding tasks to scheduler"

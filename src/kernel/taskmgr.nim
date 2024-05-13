@@ -52,6 +52,7 @@ proc createStack*(task: var Task, space: var VMAddressSpace, npages: uint64, mod
 proc createUserTask*(
   imagePhysAddr: PhysAddr,
   imagePageCount: uint64,
+  name: string = "",
   priority: TaskPriority = 0
 ): Task =
   new(result)
@@ -102,6 +103,7 @@ proc createUserTask*(
   zeroMem(regs, sizeof(TaskRegs))
 
   result.id = taskId
+  result.name = name
   result.priority = priority
   result.ustack = ustack
   result.kstack = kstack
@@ -122,12 +124,12 @@ type
   KernelProc* = proc () {.cdecl.}
 
 proc kernelTaskWrapper*(kproc: KernelProc) =
-  debugln &"tasks: Running kernel task"
+  debugln &"tasks: Running kernel task \"{getCurrentTask().name}\""
   kproc()
   terminateTask(getCurrentTask())
   schedule()
 
-proc createKernelTask*(kproc: KernelProc, priority: TaskPriority = 0): Task =
+proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPriority = 0): Task =
   new(result)
 
   let taskId = nextId
@@ -163,6 +165,7 @@ proc createKernelTask*(kproc: KernelProc, priority: TaskPriority = 0): Task =
   regs.rdi = cast[uint64](kproc)  # pass kproc as an argument to kernelTaskWrapper
 
   result.id = taskId
+  result.name = name
   result.priority = priority
   result.kstack = kstack
   result.rsp = regsAddr

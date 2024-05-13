@@ -14,7 +14,7 @@ proc timerHandler*(frame: ptr InterruptFrame)
   # ack the interrupt
   lapic.eoi()
 
-  debug "."
+  # debug "."
   schedule()
 
 proc timerInit*() =

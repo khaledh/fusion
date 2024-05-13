@@ -95,11 +95,11 @@ proc print*(args: ptr SyscallArgs): int {.cdecl.} =
   # debugln &"syscall: print: arg1.len = {cast[ptr uint64](args.arg1)[]}"
   # debugln &"syscall: print: arg1.p   = {cast[ptr uint64](args.arg1 + 8)[]:#x}"
   if args.arg1 > UserAddrSpaceEnd:
-    debugln "syscall: print: Invalid pointer"
+    # debugln "syscall: print: Invalid pointer"
     return InvalidArg.int
 
   let s = cast[ptr string](args.arg1)
-  debugln s[]
+  debug s[]
 
   result = 0
 
@@ -115,7 +115,7 @@ proc `yield`*(args: ptr SyscallArgs): int {.cdecl.} =
 # Get Task ID
 ###
 proc getTaskId*(args: ptr SyscallArgs): int {.cdecl.} =
-  debugln &"syscall: getTaskId"
+  # debugln &"syscall: getTaskId"
   result = getCurrentTask().id.int
 
 
