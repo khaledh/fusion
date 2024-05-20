@@ -21,14 +21,28 @@ proc UserMain*(param: int) {.exportc.} =
 
   let tid = os.getTaskId()
 
-  let data = recv(chid = 0)
-  let datastr = $data
+  var data = recv(chid = 0)
+  var datastr = $data
   print(datastr.addr)
 
   if data == 1010:
     for j in 0..1000000:
       discard
+
     send(chid = 0, data = 2020)
+
+    for j in 0..1000000:
+      discard
+
+    data = recv(chid = 0)
+    datastr = $data
+    print(datastr.addr)
+
+  if data == 2020:
+    for j in 0..1000000:
+      discard
+    send(chid = 0, data = 3030)
+
 
   # let msg = $tid
   # for i in 0..50:
