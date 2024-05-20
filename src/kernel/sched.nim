@@ -32,10 +32,6 @@ proc removeTask*(t: Task) =
     readyTasks.del(idx)
 
 proc schedule*() =
-  # let currentTaskStr = if not currentTask.isNil: $currentTask.id else: "nil"
-  # debugln &"sched: currentTask = {currentTaskStr}"
-  # let readyTasksStr = $readyTasks
-  # debugln &"sched: readyTasks = {readyTasksStr}"
   if readyTasks.len == 0:
     # debugln &"sched: no ready tasks, scheduling same task"
     return
