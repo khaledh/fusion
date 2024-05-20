@@ -4,12 +4,30 @@
 
 include syscalldef
 
+proc getTaskId*(): int =
+  asm """
+    mov rdi, %1
+    syscall
+    : "=a" (`result`)
+    : "i" (`SysGetTaskId`)
+    : "rdi"
+  """
+
 proc yld*() =
   asm """
     mov rdi, %0
     syscall
     :
     : "i" (`SysYield`)
+    : "rdi"
+  """
+
+proc suspend*() =
+  asm """
+    mov rdi, %0
+    syscall
+    :
+    : "i" (`SysSuspend`)
     : "rdi"
   """
 
@@ -21,13 +39,4 @@ proc exit*(code: int) =
     :
     : "i" (`SysExit`), "r" (`code`)
     : "rdi", "rsi"
-  """
-
-proc getTaskId*(): int =
-  asm """
-    mov rdi, %1
-    syscall
-    : "=a" (`result`)
-    : "i" (`SysGetTaskId`)
-    : "rdi"
   """

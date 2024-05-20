@@ -87,3 +87,9 @@ template popRegs*() =
     pop rbx
     pop rax
   """
+
+proc disableInterrupts*() {.inline.} =
+  asm "cli"
+
+proc enableInterrupts*() {.inline.} =
+  asm "sti"

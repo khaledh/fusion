@@ -68,6 +68,13 @@ proc cpuPageFaultHandler*(frame: ptr InterruptFrame, errorCode: uint64)
   """
   debugln &"    Faulting address: {cr2:#018x}"
   debugln ""
+  debugln "  Interrupt Frame:"
+  debugln &"    IP: {frame.ip:#018x}"
+  debugln &"    CS: {frame.cs:#018x}"
+  debugln &"    Flags: {frame.flags:#018x}"
+  debugln &"    SP: {frame.sp:#018x}"
+  debugln &"    SS: {frame.ss:#018x}"
+  debugln ""
   debugln getStackTrace()
   quit()
 
@@ -88,9 +95,16 @@ proc cpuGeneralProtectionFaultHandler*(frame: ptr InterruptFrame, errorCode: uin
 
 
 template createHandler*(name: untyped, msg: string) =
-  proc name*(frame: ptr InterruptFrame) {.cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#".} =
+  proc name*(frame {.inject.}: ptr InterruptFrame) {.cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#".} =
     debugln ""
     debugln "CPU Exception: ", msg
+    debugln ""
+    debugln "  Interrupt Frame:"
+    debugln &"    IP: {frame.ip:#018x}"
+    debugln &"    CS: {frame.cs:#018x}"
+    debugln &"    Flags: {frame.flags:#018x}"
+    debugln &"    SP: {frame.sp:#018x}"
+    debugln &"    SS: {frame.ss:#018x}"
     debugln ""
     debugln getStackTrace()
     quit()

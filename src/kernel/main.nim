@@ -3,7 +3,9 @@
 ]#
 
 import common/[bootinfo, libc, malloc, pagetables]
+import channels
 import cpu
+import queues
 import idt
 import lapic
 import gdt
@@ -92,6 +94,10 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   sched.addTask(idleTask)
   sched.addTask(utask1)
   sched.addTask(utask2)
+
+  debugln "kernel: Creating a channel"
+  let ch = newChannel()
+  send(ch.id, 1010)
 
   debugln "kernel: Starting scheduler"
   sched.schedule()

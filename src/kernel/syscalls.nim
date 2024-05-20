@@ -2,11 +2,14 @@
   System calls
 ]#
 
+import channels
 import cpu
 import gdt
 import sched
 import taskdef
 import taskmgr
+
+import syslib/syscalldef
 
 type
   SyscallHandler = proc (args: ptr SyscallArgs): int {.cdecl.}
@@ -22,7 +25,7 @@ const
   UserAddrSpaceEnd* = 0x00007FFFFFFFFFFF'u64
 
 var
-  syscallTable: array[256, SyscallHandler]
+  syscallTable: array[1024, SyscallHandler]
   currentTask {.importc.}: Task
 
 proc syscallEntry() {.asmNoStackFrame.} =
@@ -80,28 +83,11 @@ proc syscall(args: ptr SyscallArgs): int {.exportc.} =
 ###############################################################################
 
 ###
-# Exit
+# Get Task ID
 ###
-proc exit*(args: ptr SyscallArgs): int {.cdecl.} =
-  debugln &"syscall: exit: code={args.arg1}"
-  terminateTask(getCurrentTask())
-  schedule()
-
-###
-# Print
-###
-proc print*(args: ptr SyscallArgs): int {.cdecl.} =
-  # debugln &"syscall: print (arg1={args.arg1:#x})"
-  # debugln &"syscall: print: arg1.len = {cast[ptr uint64](args.arg1)[]}"
-  # debugln &"syscall: print: arg1.p   = {cast[ptr uint64](args.arg1 + 8)[]:#x}"
-  if args.arg1 > UserAddrSpaceEnd:
-    # debugln "syscall: print: Invalid pointer"
-    return InvalidArg.int
-
-  let s = cast[ptr string](args.arg1)
-  debug s[]
-
-  result = 0
+proc getTaskId*(args: ptr SyscallArgs): int {.cdecl.} =
+  debugln &"syscall: getTaskId"
+  result = getCurrentTask().id.int
 
 ###
 # Yield
@@ -110,21 +96,66 @@ proc `yield`*(args: ptr SyscallArgs): int {.cdecl.} =
   debugln &"syscall: yield"
   schedule()
 
+###
+# Suspend
+###
+proc suspend*(args: ptr SyscallArgs): int {.cdecl.} =
+  debugln &"syscall: suspend"
+  suspend()
 
 ###
-# Get Task ID
+# Exit
 ###
-proc getTaskId*(args: ptr SyscallArgs): int {.cdecl.} =
-  # debugln &"syscall: getTaskId"
-  result = getCurrentTask().id.int
+proc exit*(args: ptr SyscallArgs): int {.cdecl.} =
+  debugln &"syscall: exit: code={args.arg1}"
+  terminate()
 
+
+###
+# ChannelSend
+###
+proc channelSend*(args: ptr SyscallArgs): int {.cdecl.} =
+  let chid = args.arg1
+  let data = args.arg2
+  debugln &"syscall: channelSend: chid={chid}, data={data}"
+  send(chid.int, data.int)
+
+###
+# ChannelRecv
+###
+proc channelRecv*(args: ptr SyscallArgs): int {.cdecl.} =
+  let chid = args.arg1
+  debugln &"syscall: channelRecv: chid={chid}"
+  result = recv(chid.int)
+  debugln &"syscall: channelRecv: result={result}"
+
+###
+# Print
+###
+proc print*(args: ptr SyscallArgs): int {.cdecl.} =
+  debugln &"syscall: print"
+  # debugln &"syscall: print: arg1.len = {cast[ptr uint64](args.arg1)[]}"
+  # debugln &"syscall: print: arg1.p   = {cast[ptr uint64](args.arg1 + 8)[]:#x}"
+  if args.arg1 > UserAddrSpaceEnd:
+    # debugln "syscall: print: Invalid pointer"
+    return InvalidArg.int
+
+  let s = cast[ptr string](args.arg1)
+  debugln s[]
+
+  result = 0
 
 proc syscallInit*() =
   # set up syscall table
-  syscallTable[1] = exit
-  syscallTable[2] = print
-  syscallTable[3] = `yield`
-  syscallTable[4] = getTaskId
+  syscallTable[SysGetTaskId] = getTaskId
+  syscallTable[SysYield] = `yield`
+  syscallTable[SysSuspend] = suspend
+  syscallTable[SysExit] = exit
+
+  syscallTable[SysChannelSend] = channelSend
+  syscallTable[SysChannelRecv] = channelRecv
+
+  syscallTable[SysPrint] = print
 
   # enable syscall feature
   writeMSR(IA32_EFER, readMSR(IA32_EFER) or 1)  # Bit 0: SYSCALL Enable

@@ -3,6 +3,7 @@
 ]#
 
 import common/pagetables
+import cpu
 import loader
 import gdt
 import sched
@@ -13,7 +14,8 @@ import vmm
 {.experimental: "codeReordering".}
 
 var
-  nextId: uint64 = 0
+  tasks = newSeq[Task]()
+  nextTaskId: uint64 = 0
 
 proc iretq*() {.asmNoStackFrame.} =
   ## We push the address of this proc after the interrupt stack frame so that a simple
@@ -21,10 +23,16 @@ proc iretq*() {.asmNoStackFrame.} =
   ## makes returning from both new and interrupted tasks the same.
   asm "iretq"
 
-proc createStack*(task: var Task, space: var VMAddressSpace, npages: uint64, mode: PageMode): TaskStack =
+proc createStack*(
+  vmRegions: var seq[VMRegion],
+  pml4: ptr PML4Table,
+  space: var VMAddressSpace,
+  npages: uint64,
+  mode: PageMode
+): TaskStack =
   let stackRegion = vmalloc(space, npages)
-  vmmap(stackRegion, task.pml4, paReadWrite, mode, noExec = true)
-  task.vmRegions.add(stackRegion)
+  vmmap(stackRegion, pml4, paReadWrite, mode, noExec = true)
+  vmRegions.add(stackRegion)
   result.data = cast[ptr UncheckedArray[uint64]](stackRegion.start)
   result.size = npages * PageSize
   result.bottom = cast[uint64](result.data) + result.size
@@ -55,31 +63,26 @@ proc createUserTask*(
   name: string = "",
   priority: TaskPriority = 0
 ): Task =
-  new(result)
 
-  let taskId = nextId
-  inc nextId
-
-  result.isUser = true
-  result.vmRegions = @[]
-  result.pml4 = cast[ptr PML4Table](new PML4Table)
+  var vmRegions = newSeq[VMRegion]()
+  var pml4 = cast[ptr PML4Table](new PML4Table)
 
   debugln &"tasks: Loading task from ELF image"
   let imagePtr = cast[pointer](p2v(imagePhysAddr))
-  let loadedImage = load(imagePtr, result.pml4)
-  result.vmRegions.add(loadedImage.vmRegion)
+  let loadedImage = load(imagePtr, pml4)
+  vmRegions.add(loadedImage.vmRegion)
   debugln &"tasks: Loaded task at: {loadedImage.vmRegion.start.uint64:#x}"
 
   # map kernel space
   # debugln &"tasks: Mapping kernel space in task's page table"
   var kpml4 = getActivePML4()
   for i in 256 ..< 512:
-    result.pml4.entries[i] = kpml4.entries[i]
+    pml4.entries[i] = kpml4.entries[i]
 
   # create user and kernel stacks
   # debugln &"tasks: Creating task stacks"
-  let ustack = createStack(result, uspace, 1, pmUser)
-  let kstack = createStack(result, kspace, 1, pmSupervisor)
+  let ustack = createStack(vmRegions, pml4, uspace, 1, pmUser)
+  let kstack = createStack(vmRegions, pml4, kspace, 1, pmSupervisor)
 
   # create stack frame
 
@@ -101,24 +104,27 @@ proc createUserTask*(
   let regsAddr = iretqPtrAddr - sizeof(TaskRegs).uint64
   var regs = cast[ptr TaskRegs](regsAddr)
   zeroMem(regs, sizeof(TaskRegs))
+  regs.rdi = 5050
 
-  result.id = taskId
-  result.name = name
-  result.priority = priority
-  result.ustack = ustack
-  result.kstack = kstack
-  result.rsp = regsAddr
-  result.state = TaskState.New
+  let taskId = nextTaskId
+  inc nextTaskId
+
+  result = Task(
+    id: taskId,
+    name: name,
+    priority: priority,
+    vmRegions: vmRegions,
+    pml4: pml4,
+    ustack: ustack,
+    kstack: kstack,
+    rsp: regsAddr,
+    state: TaskState.New,
+    isUser: true,
+  )
+
+  tasks.add(result)
 
   debugln &"tasks: Created user task {taskId}"
-
-
-proc terminateTask*(task: Task) =
-  debugln &"tasks: Terminating task {task.id}"
-  # vmfree(task.space, task.ustack.data, task.ustack.size div PageSize)
-  # vmfree(task.space, task.kstack.data, task.kstack.size div PageSize)
-  task.state = TaskState.Terminated
-
 
 type
   KernelProc* = proc () {.cdecl.}
@@ -126,21 +132,15 @@ type
 proc kernelTaskWrapper*(kproc: KernelProc) =
   debugln &"tasks: Running kernel task \"{getCurrentTask().name}\""
   kproc()
-  terminateTask(getCurrentTask())
-  schedule()
+  terminate()
 
 proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPriority = 0): Task =
-  new(result)
 
-  let taskId = nextId
-  inc nextId
-
-  result.isUser = false
-  result.vmRegions = @[]
-  result.pml4 = getActivePML4()
+  var vmRegions = newSeq[VMRegion]()
+  var pml4 = getActivePML4()
 
   debugln &"tasks: Creating kernel task"
-  let kstack = createStack(result, kspace, 1, pmSupervisor)
+  let kstack = createStack(vmRegions, pml4, kspace, 1, pmSupervisor)
 
   # create stack frame
 
@@ -164,11 +164,50 @@ proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPrior
   zeroMem(regs, sizeof(TaskRegs))
   regs.rdi = cast[uint64](kproc)  # pass kproc as an argument to kernelTaskWrapper
 
-  result.id = taskId
-  result.name = name
-  result.priority = priority
-  result.kstack = kstack
-  result.rsp = regsAddr
-  result.state = TaskState.New
+  let taskId = nextTaskId
+  inc nextTaskId
+
+  result = Task(
+    id: taskId,
+    name: name,
+    priority: priority,
+    vmRegions: vmRegions,
+    pml4: pml4,
+    kstack: kstack,
+    rsp: regsAddr,
+    state: TaskState.New,
+    isUser: false,
+  )
+  tasks.add(result)
 
   debugln &"tasks: Created kernel task {taskId}"
+
+###
+# Task operations on self
+###
+
+proc suspend*() =
+  var task = sched.getCurrentTask()
+  debugln &"tasks: Suspending task {task.id}"
+  task.state = TaskState.Suspended
+  sched.removeTask(task)
+  sched.schedule()
+  debugln &"tasks: Resumed task {task.id}"
+
+proc terminate*() =
+  var task = sched.getCurrentTask()
+  debugln &"tasks: Terminating task {task.id}"
+  task.state = TaskState.Terminated
+  # vmfree(task.space, task.ustack.data, task.ustack.size div PageSize)
+  # vmfree(task.space, task.kstack.data, task.kstack.size div PageSize)
+  sched.removeTask(task)
+  sched.schedule()
+
+###
+# Task operations on other tasks
+###
+
+proc resume*(task: Task) =
+  debugln &"tasks: Resuming task {task.id}"
+  task.state = TaskState.Ready
+  sched.addTask(task)

@@ -30,6 +30,7 @@ type
     New
     Ready
     Running
+    Suspended
     Terminated
 
   TaskRegs* {.packed.} = object
@@ -38,3 +39,7 @@ type
 
   InterruptStackFrame* {.packed.} = object
     rip*, cs*, rflags*, rsp*, ss*: uint64
+
+
+proc `$`*(t: Task): string =
+  return $t.id & " \"" & t.name & "\""
