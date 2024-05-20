@@ -12,7 +12,7 @@ import taskmgr
 import syslib/syscalldef
 
 type
-  SyscallHandler = proc (args: ptr SyscallArgs): int {.cdecl.}
+  SyscallHandler = proc (args: ptr SyscallArgs): int
   SyscallArgs = object
     num: uint64
     arg1, arg2, arg3, arg4, arg5: uint64
@@ -23,6 +23,9 @@ type
 
 const
   UserAddrSpaceEnd* = 0x00007FFFFFFFFFFF'u64
+
+let
+  logger = DebugLogger(name: "syscall")
 
 var
   syscallTable: array[1024, SyscallHandler]
@@ -73,7 +76,7 @@ proc syscallEntry() {.asmNoStackFrame.} =
   """
 
 proc syscall(args: ptr SyscallArgs): int {.exportc.} =
-  # debugln &"syscall: num={args.num}"
+  # logger.info &"num={args.num}"
   if args.num > syscallTable.high.uint64 or syscallTable[args.num] == nil:
     return InvalidSyscall.int
   result = syscallTable[args.num](args)
@@ -85,65 +88,63 @@ proc syscall(args: ptr SyscallArgs): int {.exportc.} =
 ###
 # Get Task ID
 ###
-proc getTaskId*(args: ptr SyscallArgs): int {.cdecl.} =
-  debugln &"syscall: getTaskId"
+proc getTaskId*(args: ptr SyscallArgs): int =
+  logger.info &"[tid:{getCurrentTask().id}] getTaskId"
   result = getCurrentTask().id.int
 
 ###
 # Yield
 ###
-proc `yield`*(args: ptr SyscallArgs): int {.cdecl.} =
-  debugln &"syscall: yield"
+proc `yield`*(args: ptr SyscallArgs): int =
+  logger.info &"[tid:{getCurrentTask().id}] yield"
   schedule()
 
 ###
 # Suspend
 ###
-proc suspend*(args: ptr SyscallArgs): int {.cdecl.} =
-  debugln &"syscall: suspend"
+proc suspend*(args: ptr SyscallArgs): int =
+  logger.info &"[tid:{getCurrentTask().id}] suspend"
   suspend()
 
 ###
 # Exit
 ###
-proc exit*(args: ptr SyscallArgs): int {.cdecl.} =
-  debugln &"syscall: exit: code={args.arg1}"
+proc exit*(args: ptr SyscallArgs): int =
+  logger.info &"[tid:{getCurrentTask().id}] exit: code={args.arg1}"
   terminate()
 
 
 ###
 # ChannelSend
 ###
-proc channelSend*(args: ptr SyscallArgs): int {.cdecl.} =
+proc channelSend*(args: ptr SyscallArgs): int =
   let chid = args.arg1
   let data = args.arg2
-  debugln &"syscall: channelSend: chid={chid}, data={data}"
+  logger.info &"[tid:{getCurrentTask().id}] channelSend: chid={chid}, data={data}"
   send(chid.int, data.int)
 
 ###
 # ChannelRecv
 ###
-proc channelRecv*(args: ptr SyscallArgs): int {.cdecl.} =
+proc channelRecv*(args: ptr SyscallArgs): int {.stackTrace:off.} =
   let chid = args.arg1
-  debugln &"syscall: channelRecv: chid={chid}"
+  logger.info &"[tid:{getCurrentTask().id}] channelRecv: chid={chid}"
   result = recv(chid.int)
-  debugln &"syscall: channelRecv: result={result}"
-
+  
 ###
 # Print
 ###
-proc print*(args: ptr SyscallArgs): int {.cdecl.} =
-  debugln &"syscall: print"
-  # debugln &"syscall: print: arg1.len = {cast[ptr uint64](args.arg1)[]}"
-  # debugln &"syscall: print: arg1.p   = {cast[ptr uint64](args.arg1 + 8)[]:#x}"
+proc print*(args: ptr SyscallArgs): int =
+  logger.info &"[tid:{getCurrentTask().id}] print"
+  # logger.info &"print: arg1.len = {cast[ptr uint64](args.arg1)[]}"
+  # logger.info &"print: arg1.p   = {cast[ptr uint64](args.arg1 + 8)[]:#x}"
   if args.arg1 > UserAddrSpaceEnd:
-    # debugln "syscall: print: Invalid pointer"
+    # logger.info "print: Invalid pointer"
     return InvalidArg.int
 
   let s = cast[ptr string](args.arg1)
-  debugln s[]
-
-  result = 0
+  logger.raw s[]
+  logger.raw "\n"
 
 proc syscallInit*() =
   # set up syscall table

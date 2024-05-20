@@ -13,6 +13,9 @@ import vmm
 
 {.experimental: "codeReordering".}
 
+let
+  logger = DebugLogger(name: "taskmgr")
+
 var
   tasks = newSeq[Task]()
   nextTaskId: uint64 = 0
@@ -67,26 +70,26 @@ proc createUserTask*(
   var vmRegions = newSeq[VMRegion]()
   var pml4 = cast[ptr PML4Table](new PML4Table)
 
-  debugln &"tasks: Loading task from ELF image"
+  logger.info &"loading task from ELF image"
   let imagePtr = cast[pointer](p2v(imagePhysAddr))
   let loadedImage = load(imagePtr, pml4)
   vmRegions.add(loadedImage.vmRegion)
-  debugln &"tasks: Loaded task at: {loadedImage.vmRegion.start.uint64:#x}"
+  logger.info &"loaded task at: {loadedImage.vmRegion.start.uint64:#x}"
 
   # map kernel space
-  # debugln &"tasks: Mapping kernel space in task's page table"
+  # logger.info &"mapping kernel space in task's page table"
   var kpml4 = getActivePML4()
   for i in 256 ..< 512:
     pml4.entries[i] = kpml4.entries[i]
 
   # create user and kernel stacks
-  # debugln &"tasks: Creating task stacks"
+  # logger.info &"creating task stacks"
   let ustack = createStack(vmRegions, pml4, uspace, 1, pmUser)
   let kstack = createStack(vmRegions, pml4, kspace, 1, pmSupervisor)
 
   # create stack frame
 
-  # debugln &"tasks: Setting up interrupt stack frame"
+  # logger.info &"setting up interrupt stack frame"
   let isfAddr = kstack.bottom - sizeof(InterruptStackFrame).uint64
   var isf = cast[ptr InterruptStackFrame](isfAddr)
   isf.ss = cast[uint64](DataSegmentSelector)
@@ -95,12 +98,12 @@ proc createUserTask*(
   isf.cs = cast[uint64](UserCodeSegmentSelector)
   isf.rip = cast[uint64](loadedImage.entryPoint)
 
-  # debugln &"tasks: Setting up iretq proc ptr"
+  # logger.info &"setting up iretq proc ptr"
   let iretqPtrAddr = isfAddr - sizeof(uint64).uint64
   var iretqPtr = cast[ptr uint64](iretqPtrAddr)
   iretqPtr[] = cast[uint64](iretq)
 
-  # debugln &"tasks: Setting up task registers"
+  # logger.info &"setting up task registers"
   let regsAddr = iretqPtrAddr - sizeof(TaskRegs).uint64
   var regs = cast[ptr TaskRegs](regsAddr)
   zeroMem(regs, sizeof(TaskRegs))
@@ -124,13 +127,13 @@ proc createUserTask*(
 
   tasks.add(result)
 
-  debugln &"tasks: Created user task {taskId}"
+  logger.info &"created user task {taskId}"
 
 type
   KernelProc* = proc () {.cdecl.}
 
 proc kernelTaskWrapper*(kproc: KernelProc) =
-  debugln &"tasks: Running kernel task \"{getCurrentTask().name}\""
+  logger.info &"running kernel task \"{getCurrentTask().name}\""
   kproc()
   terminate()
 
@@ -139,12 +142,12 @@ proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPrior
   var vmRegions = newSeq[VMRegion]()
   var pml4 = getActivePML4()
 
-  debugln &"tasks: Creating kernel task"
+  logger.info &"creating kernel task"
   let kstack = createStack(vmRegions, pml4, kspace, 1, pmSupervisor)
 
   # create stack frame
 
-  # debugln &"tasks: Setting up interrupt stack frame"
+  # logger.info &"setting up interrupt stack frame"
   let isfAddr = kstack.bottom - sizeof(InterruptStackFrame).uint64
   var isf = cast[ptr InterruptStackFrame](isfAddr)
   isf.ss = 0  # kernel ss selector must be null
@@ -153,12 +156,12 @@ proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPrior
   isf.cs = cast[uint64](KernelCodeSegmentSelector)
   isf.rip = cast[uint64](kernelTaskWrapper)
 
-  # debugln &"tasks: Setting up iretq proc ptr"
+  # logger.info &"setting up iretq proc ptr"
   let iretqPtrAddr = isfAddr - sizeof(uint64).uint64
   var iretqPtr = cast[ptr uint64](iretqPtrAddr)
   iretqPtr[] = cast[uint64](iretq)
 
-  # debugln &"tasks: Setting up task registers"
+  # logger.info &"setting up task registers"
   let regsAddr = iretqPtrAddr - sizeof(TaskRegs).uint64
   var regs = cast[ptr TaskRegs](regsAddr)
   zeroMem(regs, sizeof(TaskRegs))
@@ -180,7 +183,7 @@ proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPrior
   )
   tasks.add(result)
 
-  debugln &"tasks: Created kernel task {taskId}"
+  logger.info &"created kernel task {taskId}"
 
 ###
 # Task operations on self
@@ -188,15 +191,15 @@ proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPrior
 
 proc suspend*() =
   var task = sched.getCurrentTask()
-  debugln &"tasks: Suspending task {task.id}"
+  logger.info &"suspending task {task.id}"
   task.state = TaskState.Suspended
   sched.removeTask(task)
   sched.schedule()
-  debugln &"tasks: Resumed task {task.id}"
+  logger.info &"resumed task {task.id}"
 
 proc terminate*() =
   var task = sched.getCurrentTask()
-  debugln &"tasks: Terminating task {task.id}"
+  logger.info &"terminating task {task.id}"
   task.state = TaskState.Terminated
   # vmfree(task.space, task.ustack.data, task.ustack.size div PageSize)
   # vmfree(task.space, task.kstack.data, task.kstack.size div PageSize)
@@ -208,6 +211,6 @@ proc terminate*() =
 ###
 
 proc resume*(task: Task) =
-  debugln &"tasks: Resuming task {task.id}"
+  logger.info &"resuming task {task.id}"
   task.state = TaskState.Ready
   sched.addTask(task)

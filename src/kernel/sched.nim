@@ -9,6 +9,8 @@ import taskdef
 
 {.experimental: "codeReordering".}
 
+let logger = DebugLogger(name: "sched")
+
 var
   readyTasks = initHeapQueue[Task]()
   currentTask {.exportc.}: Task
@@ -33,13 +35,13 @@ proc removeTask*(t: Task) =
 
 proc schedule*() =
   if readyTasks.len == 0:
-    # debugln &"sched: no ready tasks, scheduling same task"
+    # logger.info &"no ready tasks, scheduling same task"
     return
 
   if not currentTask.isNil and currentTask.state == Running:
     if currentTask.priority > readyTasks[0].priority:
       # the current task has higher priority than the next task
-      # debugln &"sched: no higher priority task, scheduling same task"
+      # logger.info &"no higher priority task, scheduling same task"
       return
     # put the current task back into the queue
     currentTask.state = TaskState.Ready
@@ -48,11 +50,11 @@ proc schedule*() =
   # switch to the task with the highest priority
   var nextTask = readyTasks.pop()
 
-  debugln &"sched: switching -> {nextTask.id}"
+  logger.info &"switching -> {nextTask.id}"
 
   # if currentTask.isNil or currentTask.state == Terminated:
-  #   debugln &"sched: switching -> {nextTask.id}"
+  #   logger.info &"switching -> {nextTask.id}"
   # else:
-  #   debugln &"sched: switching {currentTask.id} -> {nextTask.id}"
+  #   logger.info &"switching {currentTask.id} -> {nextTask.id}"
 
   switchTo(nextTask)

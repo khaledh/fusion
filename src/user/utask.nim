@@ -14,7 +14,7 @@ proc NimMain() {.importc.}
 proc UserMain*(param: int) {.exportc.} =
   NimMain()
 
-  let paramMsg = "[task] param: "
+  let paramMsg = "param: "
   print(paramMsg.addr)
   let paramStr = $param
   print(paramStr.addr)

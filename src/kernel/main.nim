@@ -17,6 +17,10 @@ import taskmgr
 import timer
 import vmm
 
+const KernelVersion = "0.1.0"
+
+let logger = DebugLogger(name: "main")
+
 proc NimMain() {.importc.}
 proc KernelMainInner(bootInfo: ptr BootInfo)
 proc unhandledException*(e: ref Exception)
@@ -36,24 +40,25 @@ proc KernelMain(bootInfo: ptr BootInfo) {.exportc.} =
   quit()
 
 proc KernelMainInner(bootInfo: ptr BootInfo) =
-  debugln ""
-  debugln "kernel: Fusion Kernel"
+  logger.raw "\n"
+  logger.raw &"Fusion Kernel (v{KernelVersion})\n"
+  logger.raw "\n"
 
-  debugln "kernel: Init PMM"
+  logger.info "init pmm"
   pmInit(bootInfo.physicalMemoryVirtualBase, bootInfo.physicalMemoryMap)
 
-  debugln "kernel: Init VMM"
+  logger.info "init vmm"
   vmInit(bootInfo.physicalMemoryVirtualBase, pmm.pmAlloc)
   vmAddRegion(kspace, bootInfo.kernelImageVirtualBase.VirtAddr, bootInfo.kernelImagePages)
   vmAddRegion(kspace, bootInfo.kernelStackVirtualBase.VirtAddr, bootInfo.kernelStackPages)
 
-  debugln "kernel: Init GDT"
+  logger.info "init gdt"
   gdtInit()
 
-  debugln "kernel: Init IDT"
+  logger.info "init idt"
   idtInit()
 
-  debugln "kernel: Init LAPIC "
+  logger.info "init lapic"
   let lapicPhysAddr = lapic.getBasePhysAddr()
   let lapicFrameAddr = lapicPhysAddr - (lapicPhysAddr mod PageSize)
   # map LAPIC frame into virtual memory
@@ -69,13 +74,13 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   )
   lapicInit(lapicVMRegion.start.uint64)
   
-  debugln "kernel: Init timer"
+  logger.info "init timer"
   timerInit()
 
-  debugln "kernel: Init syscalls"
+  logger.info "init syscalls"
   syscallInit()
 
-  debugln "kernel: Creating tasks"
+  logger.info "creating tasks"
 
   let idleTask = createKernelTask(cpu.idle, "idle", low(TaskPriority))
 
@@ -90,16 +95,16 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
     name = "utask2",
   )
 
-  debugln "kernel: Adding tasks to scheduler"
+  logger.info "adding tasks to scheduler"
   sched.addTask(idleTask)
   sched.addTask(utask1)
   sched.addTask(utask2)
 
-  debugln "kernel: Creating a channel"
+  logger.info "creating a channel"
   let ch = newChannel()
   send(ch.id, 1010)
 
-  debugln "kernel: Starting scheduler"
+  logger.info "starting scheduler"
   sched.schedule()
 
 ####################################################################################################
@@ -107,10 +112,10 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
 ####################################################################################################
 
 proc unhandledException*(e: ref Exception) =
-  debugln ""
-  debugln &"Unhandled exception: [{e.name}] {e.msg}"
+  logger.info ""
+  logger.info &"Unhandled exception: [{e.name}] {e.msg}"
   if e.trace.len > 0:
-    debugln ""
-    debugln "Stack trace:"
+    logger.info ""
+    logger.info "Stack trace:"
     debug getStackTrace(e)
   quit()
