@@ -8,7 +8,7 @@ import sched
 
 const
   TimerVector = 0x20
-  TimerDurationMs = 20  # milliseconds
+  TimerDurationMs = 10  # milliseconds
 
 proc timerHandler*(frame: ptr InterruptFrame)
   {. cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#" .} =

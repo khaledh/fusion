@@ -211,6 +211,6 @@ proc terminate*() =
 ###
 
 proc resume*(task: Task) =
-  logger.info &"resuming task {task.id}"
+  logger.info &"setting task {task.id} to ready"
   task.state = TaskState.Ready
   sched.addTask(task)

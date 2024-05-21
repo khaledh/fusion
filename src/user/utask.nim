@@ -14,10 +14,10 @@ proc NimMain() {.importc.}
 proc UserMain*(param: int) {.exportc.} =
   NimMain()
 
-  let paramMsg = "param: "
-  print(paramMsg.addr)
-  let paramStr = $param
-  print(paramStr.addr)
+  # let paramMsg = "param: "
+  # print(paramMsg.addr)
+  # let paramStr = $param
+  # print(paramStr.addr)
 
   let tid = os.getTaskId()
 
@@ -42,23 +42,5 @@ proc UserMain*(param: int) {.exportc.} =
     for j in 0..1000000:
       discard
     send(chid = 0, data = 3030)
-
-
-  # let msg = $tid
-  # for i in 0..50:
-  #   print(msg.addr)
-  #   for j in 0..1000000:
-  #     discard
-
-  # # if tid == 1:
-  # #   print(newline.addr)
-  # #   suspend()
-
-  # for i in 0..50:
-  #   print(msg.addr)
-  #   for j in 0..1000000:
-  #     discard
-
-  # print(newline.addr)
 
   exit(0)
