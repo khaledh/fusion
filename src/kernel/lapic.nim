@@ -3,6 +3,7 @@
 ]#
 
 import cpu
+import pit
 
 type
   IA32ApicBaseMsr {.packed.} = object
@@ -39,6 +40,22 @@ type
     TimerCurrentCount  = 0x390
     TimerDivideConfig  = 0x3e0
 
+  TimerMode = enum
+    OneShot     = 0b00 shl 17
+    Periodic    = 0b01 shl 17
+    TscDeadline = 0b10 shl 17
+
+  InterruptMask = enum
+    NotMasked = 0 shl 16
+    Masked    = 1 shl 16
+  
+  DeliveryStatus = enum
+    Idle        = 0 shl 12
+    SendPending = 1 shl 12
+
+let
+  logger = DebugLogger(name: "lapic")
+
 var
   baseAddress: uint64
 
@@ -48,6 +65,12 @@ proc getBasePhysAddr*(): uint32 =
 
 proc lapicInit*(baseAddr: uint64) =
   baseAddress = baseAddr
+
+proc readRegister(offset: int): uint32 =
+  result = cast[ptr uint32](baseAddress + offset.uint16)[]
+
+proc readRegister(offset: LapicOffset): uint32 =
+  readRegister(offset.int)
 
 proc writeRegister(offset: int, value: uint32) =
   cast[ptr uint32](baseAddress + offset.uint16)[] = value
@@ -75,10 +98,47 @@ type
     DivideBy128 = 0b1010
     DivideBy1   = 0b1011
 
-const
-  InitialCount = 500_000
 
-proc setTimer*(vector: uint8) =
+proc calcBusFrequency(): uint32 =
+  # estimate the bus frequency using the PIT timer
+  let pitInterval = 50  # ms
+  let pitCount = uint16((PitFrequency div 1000) * pitInterval)
+
+  # set the APIC timer to one-shot mode with max count
+  writeRegister(LapicOffset.LvtTimer, TimerMode.OneShot.uint32)
+  writeRegister(LapicOffset.TimerDivideConfig, DivideBy64.uint32)
+  writeRegister(LapicOffset.TimerInitialCount, uint32.high)
+
+  # start the PIT timer
+  pit.startOneShot(divisor = pitCount)  # 10 ms
+
+  # wait for the PIT timer to expire
+  while pit.readStatus().outputPinState == 0:
+    discard
+
+  # read the APIC timer count
+  let apicEndCount = readRegister(LapicOffset.TimerCurrentCount)
+  let apicTickCount = uint32.high - apicEndCount
+
+  # calculate the bus frequency
+  let busFrequency = (apicTickCount div pitInterval.uint32) * 1000 * 64
+  # logger.info &"bus frequency: {busFrequency} Hz"
+
+  result = busFrequency
+
+proc setTimer*(vector: uint8, durationMs: uint32) =
+  logger.info "calculating bus frequency"
+  var sumFreq = 0'u64
+  for i in 0..<5:
+    inc sumFreq, calcBusFrequency()
+    # debugln ""
+
+  let avgFreq = sumFreq div 5
+  logger.info &"average bus frequency: {avgFreq} Hz"
+
+  logger.info &"setting apic timer interval to {durationMs} ms on vector {vector:#x}"
+  let initialCount = uint32(avgFreq div 16) div (1000 div durationMs)
+
+  writeRegister(LapicOffset.LvtTimer, vector.uint32 or TimerMode.Periodic.uint32)
   writeRegister(LapicOffset.TimerDivideConfig, DivideBy16.uint32)
-  writeRegister(LapicOffset.TimerInitialCount, InitialCount)
-  writeRegister(LapicOffset.LvtTimer, vector.uint32 or (1 shl 17))
+  writeRegister(LapicOffset.TimerInitialCount, initialCount)

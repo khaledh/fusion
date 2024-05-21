@@ -8,6 +8,7 @@ import sched
 
 const
   TimerVector = 0x20
+  TimerDurationMs = 20  # milliseconds
 
 proc timerHandler*(frame: ptr InterruptFrame)
   {. cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#" .} =
@@ -15,8 +16,9 @@ proc timerHandler*(frame: ptr InterruptFrame)
   lapic.eoi()
 
   # debugln "timer"
+  # debug "."
   schedule()
 
 proc timerInit*() =
   idt.installHandler(TimerVector, timerHandler)
-  lapic.setTimer(TimerVector)
+  lapic.setTimer(TimerVector, TimerDurationMs)
