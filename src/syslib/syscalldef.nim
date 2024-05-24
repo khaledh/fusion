@@ -7,7 +7,8 @@ const
   SysGetTaskId* = 101
   SysYield* = 102
   SysSuspend* = 103
-  SysExit* = 104
+  SysSleep* = 104
+  SysExit* = 105
 
   # I/O
   SysPrint* = 201

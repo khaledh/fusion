@@ -2,11 +2,14 @@
   Task management
 ]#
 
+import std/heapqueue
+
 import common/pagetables
-import cpu
+import lapic
 import loader
 import gdt
 import sched
+import timer
 import taskdef
 import vmm
 
@@ -18,7 +21,14 @@ let
 
 var
   tasks = newSeq[Task]()
+  sleepers = initHeapQueue[Task]()
   nextTaskId: uint64 = 0
+
+proc `<`(a, b: Task): bool = a.sleepUntil < b.sleepUntil
+
+
+proc taskmgrInit*() =
+  timer.registerCallback(wakeupTasks)
 
 proc iretq*() {.asmNoStackFrame.} =
   ## We push the address of this proc after the interrupt stack frame so that a simple
@@ -197,6 +207,15 @@ proc suspend*() =
   sched.schedule()
   logger.info &"resumed task {task.id}"
 
+proc sleep*(durationMs: uint64) =
+  var task = sched.getCurrentTask()
+  logger.info &"task {task.id} sleeping for {durationMs} ms"
+  task.sleepUntil = getFutureTicks(durationMs)
+  task.state = TaskState.Sleeping
+  sleepers.push(task)
+  sched.removeTask(task)
+  sched.schedule()
+
 proc terminate*() =
   var task = sched.getCurrentTask()
   logger.info &"terminating task {task.id}"
@@ -214,3 +233,17 @@ proc resume*(task: Task) =
   logger.info &"setting task {task.id} to ready"
   task.state = TaskState.Ready
   sched.addTask(task)
+
+
+proc wakeupTasks*() =
+  if sleepers.len == 0:
+    return
+
+  let now = getCurrentTicks()
+  # logger.info &"waking up tasks, sleepers.len: {sleepers.len}"
+  # logger.info &"now: {now}, sleepers[0].sleepUntil: {sleepers[0].sleepUntil}"
+  while sleepers.len > 0 and sleepers[0].sleepUntil <= now:
+    let task = sleepers.pop()
+    logger.info &"waking up task {task.id}"
+    task.state = TaskState.Ready
+    sched.addTask(task)

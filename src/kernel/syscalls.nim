@@ -107,6 +107,13 @@ proc suspend*(args: ptr SyscallArgs): int =
   suspend()
 
 ###
+# Sleep
+###
+proc sleep*(args: ptr SyscallArgs): int =
+  logger.info &"[tid:{getCurrentTask().id}] sleep: ms={args.arg1}"
+  sleep(args.arg1)
+
+###
 # Exit
 ###
 proc exit*(args: ptr SyscallArgs): int =
@@ -151,6 +158,7 @@ proc syscallInit*() =
   syscallTable[SysGetTaskId] = getTaskId
   syscallTable[SysYield] = `yield`
   syscallTable[SysSuspend] = suspend
+  syscallTable[SysSleep] = sleep
   syscallTable[SysExit] = exit
 
   syscallTable[SysChannelSend] = channelSend

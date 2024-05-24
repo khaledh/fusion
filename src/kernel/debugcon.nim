@@ -25,7 +25,7 @@ proc debugln*(msgs: varargs[string]) =
 
 proc info*(logger: DebugLogger; msgs: varargs[string]) =
   ## Send info messages to the debug console port.
-  debug &"[{logger.name:>7}] "
+  debug &"[{logger.name:>8}] "
   debug(msgs)
   debug("\r\n")
 

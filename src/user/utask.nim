@@ -2,8 +2,6 @@
   This is an example of a user task.
 ]#
 
-import std/strformat
-
 import common/[libc, malloc]
 import syslib/[channels, io, os]
 
@@ -26,21 +24,18 @@ proc UserMain*(param: int) {.exportc.} =
   print(datastr.addr)
 
   if data == 1010:
-    for j in 0..1000000:
-      discard
+    sleep(1000)
 
     send(chid = 0, data = 2020)
 
-    for j in 0..1000000:
-      discard
+    sleep(1000)
 
     data = recv(chid = 0)
     datastr = $data
     print(datastr.addr)
 
   if data == 2020:
-    for j in 0..1000000:
-      discard
+    sleep(1000)
     send(chid = 0, data = 3030)
 
   exit(0)

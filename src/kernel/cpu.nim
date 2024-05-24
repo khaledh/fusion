@@ -35,6 +35,14 @@ proc writeMSR*(ecx: uint32, value: uint64) =
     : "c"(`ecx`), "a"(`eax`), "d"(`edx`)
   """
 
+proc readTSC*(): uint64 =
+  var eax, edx: uint32
+  asm """
+    rdtsc
+    : "=a"(`eax`), "=d"(`edx`)
+  """
+  result = (edx.uint64 shl 32) or eax
+
 proc idle*() {.cdecl.} =
   while true:
     asm """

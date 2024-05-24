@@ -10,6 +10,15 @@ const
   TimerVector = 0x20
   TimerDurationMs = 10  # milliseconds
 
+type
+  TimerCallback* = proc ()
+
+var
+  callbacks: seq[TimerCallback]
+
+proc registerCallback*(callback: TimerCallback) =
+  callbacks.add(callback)
+
 proc timerHandler*(frame: ptr InterruptFrame)
   {. cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#" .} =
   # ack the interrupt
@@ -17,6 +26,9 @@ proc timerHandler*(frame: ptr InterruptFrame)
 
   # debugln "timer"
   # debug "."
+  for callback in callbacks:
+    callback()
+
   schedule()
 
 proc timerInit*() =

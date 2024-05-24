@@ -98,16 +98,36 @@ type
     DivideBy128 = 0b1010
     DivideBy1   = 0b1011
 
+const
+  TimerDivideBy = DivideBy16
+  TimerDivisor = 16
 
-proc calcBusFrequency(): uint32 =
-  # estimate the bus frequency using the PIT timer
+var
+  timerFreq: uint64
+  tscFreq: uint64
+
+proc durationToTicks*(durationMs: uint64): uint64 {.inline.} =
+  result = tscFreq * durationMs div 1000
+
+proc getCurrentTicks*(): uint64 {.inline.} =
+  result = readTSC()
+
+proc getFutureTicks*(durationMs: uint64): uint64 {.inline.} =
+  result = getCurrentTicks() + durationToTicks(durationMs)
+
+
+proc calcFrequency(): tuple[timerFreq: uint32, tscFreq: uint64] =
+  # estimate the frequency using the PIT timer
   let pitInterval = 50  # ms
   let pitCount = uint16((PitFrequency div 1000) * pitInterval)
 
   # set the APIC timer to one-shot mode with max count
   writeRegister(LapicOffset.LvtTimer, TimerMode.OneShot.uint32)
-  writeRegister(LapicOffset.TimerDivideConfig, DivideBy64.uint32)
+  writeRegister(LapicOffset.TimerDivideConfig, TimerDivideBy.uint32)
   writeRegister(LapicOffset.TimerInitialCount, uint32.high)
+
+  # read TSC
+  let tscStart = cpu.readTsc()
 
   # start the PIT timer
   pit.startOneShot(divisor = pitCount)  # 10 ms
@@ -118,27 +138,44 @@ proc calcBusFrequency(): uint32 =
 
   # read the APIC timer count
   let apicEndCount = readRegister(LapicOffset.TimerCurrentCount)
+
+  # read TSC
+  let tscEnd = cpu.readTsc()
+
   let apicTickCount = uint32.high - apicEndCount
+  let tscTickCount = tscEnd - tscStart
 
-  # calculate the bus frequency
-  let busFrequency = (apicTickCount div pitInterval.uint32) * 1000 * 64
-  # logger.info &"bus frequency: {busFrequency} Hz"
+  # calculate the timer frequency
+  let timerFreq = (apicTickCount div pitInterval.uint32) * 1000 * TimerDivisor
+  # logger.info &"timer frequency: {timerFrequency} Hz"
 
-  result = busFrequency
+  # calculate TSC frequency
+  let tscFreq = (tscTickCount div pitInterval.uint32) * 1000
+  # logger.info &"core frequency: {coreFrequency} Hz"
+
+  result = (timerFreq, tscFreq)
 
 proc setTimer*(vector: uint8, durationMs: uint32) =
-  logger.info "calculating bus frequency"
-  var sumFreq = 0'u64
-  for i in 0..<5:
-    inc sumFreq, calcBusFrequency()
+  logger.info "calculating apic timer frequency"
+
+  let count = 3'u64
+  var sumTimer, sumTsc = 0'u64
+  for i in 0 ..< count:
+    let (timerFreq, tscFreq) = calcFrequency()
+    inc sumTimer, timerFreq
+    inc sumTsc, tscFreq
     # debugln ""
 
-  let avgFreq = sumFreq div 5
-  logger.info &"average bus frequency: {avgFreq} Hz"
+  timerFreq = sumTimer div count
+  logger.info &"  ...apic timer frequency: {timerFreq} Hz"
 
-  logger.info &"setting apic timer interval to {durationMs} ms on vector {vector:#x}"
-  let initialCount = uint32(avgFreq div 16) div (1000 div durationMs)
+  tscFreq = sumTsc div count
+  logger.info &"  ...tsc frequency: {tscFreq} Hz"
+
+  logger.info &"  setting apic timer interval to {durationMs} ms (vector {vector:#x})"
+  let initialCount = uint32(timerFreq div TimerDivisor) div (1000 div durationMs)
+  # logger.info &"  initial count: {initialCount}"
 
   writeRegister(LapicOffset.LvtTimer, vector.uint32 or TimerMode.Periodic.uint32)
-  writeRegister(LapicOffset.TimerDivideConfig, DivideBy16.uint32)
+  writeRegister(LapicOffset.TimerDivideConfig, TimerDivideBy.uint32)
   writeRegister(LapicOffset.TimerInitialCount, initialCount)

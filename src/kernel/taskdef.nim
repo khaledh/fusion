@@ -17,6 +17,7 @@ type
     name*: string
     priority*: TaskPriority
     state*: TaskState
+    sleepUntil*: uint64  # based on apic timer count
     # user task fields
     vmRegions*: seq[VMRegion]
     pml4*: ptr PML4Table
@@ -31,6 +32,7 @@ type
     Ready
     Running
     Suspended
+    Sleeping
     Terminated
 
   TaskRegs* {.packed.} = object

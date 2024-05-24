@@ -80,6 +80,9 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.info "init syscalls"
   syscallInit()
 
+  logger.info "init task manager"
+  taskmgrInit()
+
   logger.info "creating tasks"
 
   let idleTask = createKernelTask(cpu.idle, "idle", low(TaskPriority))
