@@ -2,6 +2,8 @@
   x86_64 Local APIC
 ]#
 
+import std/algorithm
+
 import cpu
 import pit
 
@@ -130,7 +132,7 @@ proc calcFrequency(): tuple[timerFreq: uint32, tscFreq: uint64] =
   let tscStart = cpu.readTsc()
 
   # start the PIT timer
-  pit.startOneShot(divisor = pitCount)  # 10 ms
+  pit.startOneShot(divisor = pitCount)
 
   # wait for the PIT timer to expire
   while pit.readStatus().outputPinState == 0:
@@ -147,34 +149,33 @@ proc calcFrequency(): tuple[timerFreq: uint32, tscFreq: uint64] =
 
   # calculate the timer frequency
   let timerFreq = (apicTickCount div pitInterval.uint32) * 1000 * TimerDivisor
-  # logger.info &"timer frequency: {timerFrequency} Hz"
+  # logger.info &"timer frequency: {timerFreq} Hz"
 
   # calculate TSC frequency
   let tscFreq = (tscTickCount div pitInterval.uint32) * 1000
-  # logger.info &"core frequency: {coreFrequency} Hz"
+  # logger.info &"core frequency: {tscFreq} Hz"
 
   result = (timerFreq, tscFreq)
 
 proc setTimer*(vector: uint8, durationMs: uint32) =
   logger.info "calculating apic timer frequency"
 
-  let count = 3'u64
-  var sumTimer, sumTsc = 0'u64
-  for i in 0 ..< count:
-    let (timerFreq, tscFreq) = calcFrequency()
-    inc sumTimer, timerFreq
-    inc sumTsc, tscFreq
-    # debugln ""
+  var timerFreqs: array[5, uint32]
+  var tscFreqs: array[5, uint64]
+  for i in 0 ..< timerFreqs.len:
+    (timerFreqs[i], tscFreqs[i]) = calcFrequency()
 
-  timerFreq = sumTimer div count
+  # discard lowest and highest values
+  sort(timerFreqs)
+  timerFreq = (timerFreqs[1] + timerFreqs[2] + timerFreqs[3]) div 3
   logger.info &"  ...apic timer frequency: {timerFreq} Hz"
 
-  tscFreq = sumTsc div count
+  sort(tscFreqs)
+  tscFreq = (tscFreqs[1] + tscFreqs[2] + tscFreqs[3]) div 3
   logger.info &"  ...tsc frequency: {tscFreq} Hz"
 
   logger.info &"  ...setting apic timer interval to {durationMs} ms (vector {vector:#x})"
-  let initialCount = uint32(timerFreq div TimerDivisor) div (1000 div durationMs)
-  # logger.info &"  initial count: {initialCount}"
+  let initialCount = uint32((timerFreq * durationMs) div (1000 * TimerDivisor))
 
   writeRegister(LapicOffset.LvtTimer, vector.uint32 or TimerMode.Periodic.uint32)
   writeRegister(LapicOffset.TimerDivideConfig, TimerDivideBy.uint32)
