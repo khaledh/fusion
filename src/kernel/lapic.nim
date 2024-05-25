@@ -172,7 +172,7 @@ proc setTimer*(vector: uint8, durationMs: uint32) =
   tscFreq = sumTsc div count
   logger.info &"  ...tsc frequency: {tscFreq} Hz"
 
-  logger.info &"  setting apic timer interval to {durationMs} ms (vector {vector:#x})"
+  logger.info &"  ...setting apic timer interval to {durationMs} ms (vector {vector:#x})"
   let initialCount = uint32(timerFreq div TimerDivisor) div (1000 div durationMs)
   # logger.info &"  initial count: {initialCount}"
 

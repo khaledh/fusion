@@ -24,18 +24,18 @@ proc UserMain*(param: int) {.exportc.} =
   print(datastr.addr)
 
   if data == 1010:
-    sleep(1000)
+    sleep(100)
 
     send(chid = 0, data = 2020)
 
-    sleep(1000)
+    sleep(100)
 
     data = recv(chid = 0)
     datastr = $data
     print(datastr.addr)
 
   if data == 2020:
-    sleep(1000)
+    sleep(100)
     send(chid = 0, data = 3030)
 
   exit(0)

@@ -5,6 +5,9 @@
 import common/[bootinfo, libc, malloc, pagetables]
 import channels
 import cpu
+import devmgr
+import drivers/bga
+import drivers/pci
 import queues
 import idt
 import lapic
@@ -73,7 +76,11 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
     noExec = true
   )
   lapicInit(lapicVMRegion.start.uint64)
-  
+
+  pci.showPciConfig()
+  devmgrInit()
+  bga.setResolution(1400, 1050)
+
   logger.info "init timer"
   timerInit()
 
