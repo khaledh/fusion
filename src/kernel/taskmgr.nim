@@ -152,7 +152,7 @@ proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPrior
   var vmRegions = newSeq[VMRegion]()
   var pml4 = getActivePML4()
 
-  logger.info &"creating kernel task"
+  logger.info &"creating kernel task \"{name}\""
   let kstack = createStack(vmRegions, pml4, kspace, 1, pmSupervisor)
 
   # create stack frame

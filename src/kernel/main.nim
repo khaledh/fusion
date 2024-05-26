@@ -6,11 +6,11 @@ import common/[bootinfo, libc, malloc, pagetables]
 import channels
 import cpu
 import devmgr
-import drivers/bga
 import drivers/pci
 import queues
 import idt
 import lapic
+import gfxsrv
 import gdt
 import pmm
 import sched
@@ -79,7 +79,6 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
 
   pci.showPciConfig()
   devmgrInit()
-  bga.setResolution(1400, 1050)
 
   logger.info "init timer"
   timerInit()
@@ -94,6 +93,8 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
 
   let idleTask = createKernelTask(cpu.idle, "idle", low(TaskPriority))
 
+  let gfxTask = createKernelTask(gfxsrv.start, "gfxsrv")
+
   var utask1 = createUserTask(
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
     imagePageCount = bootInfo.userImagePages,
@@ -107,6 +108,7 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
 
   logger.info "adding tasks to scheduler"
   sched.addTask(idleTask)
+  sched.addTask(gfxTask)
   sched.addTask(utask1)
   sched.addTask(utask2)
 

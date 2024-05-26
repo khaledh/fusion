@@ -43,6 +43,13 @@ proc readTSC*(): uint64 =
   """
   result = (edx.uint64 shl 32) or eax
 
+proc readFlags*(): uint64 {.inline.} =
+  asm """
+    pushfq
+    pop %0
+    : "=r"(`result`)
+  """
+
 proc idle*() {.cdecl.} =
   while true:
     asm """
@@ -101,3 +108,10 @@ proc disableInterrupts*() {.inline.} =
 
 proc enableInterrupts*() {.inline.} =
   asm "sti"
+
+template withInterruptsDisabled*(blk: untyped) =
+  let flags = readFlags()
+  disableInterrupts()
+  blk
+  if (flags and 0x200'u64) == 0x200'u64:
+    enableInterrupts()
