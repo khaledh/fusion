@@ -54,6 +54,7 @@ let
 var
   fbPhysAddr: uint64
   fbVirtAddr: uint64
+  fbNumPages: uint64
 
 proc pciInit*(dev: PciDeviceConfig) =
   logger.info &"initializing Bochs Graphics Adapter"
@@ -63,6 +64,9 @@ proc pciInit*(dev: PciDeviceConfig) =
 
   logger.info &"  ...id = {bgaId:0>4x}"
   logger.info &"  ...framebuffer physical address = {fbPhysAddr:0>16x}"
+
+proc getFramebuffer*(): ptr UncheckedArray[uint32] =
+  cast[ptr UncheckedArray[uint32]](fbVirtAddr)
 
 proc bgaWriteRegister(index, value: uint16) =
   portOut16(BgaPortIndex, index)
@@ -82,32 +86,38 @@ proc bgaSetVideoMode*(width, height, bpp: uint16) =
 proc bgaSetYOffset*(offset: uint16) =
   bgaWriteRegister(BgaPortIndexYOffset, offset)
 
-proc setResolution*(xres, yres: uint16) =
-  logger.info &"setting video mode to {xres}x{yres}"
-  bgaSetVideoMode(xres, yres, 32)
-
-  let virtWidth = bgaReadRegister(BgaPortIndexVirtWidth)
-  let virtHeight = bgaReadRegister(BgaPortIndexVirtHeight)
-  logger.info &"  ...virtual resolution = {virtWidth}x{virtHeight}"
-
-  let numPages = (xres.uint64 * yres.uint64 * 4 + (PageSize - 1)) div PageSize
-  let fbVMRegion = vmalloc(kspace, numPages)
+proc mapFramebuffer*(width, height: uint32): tuple[virtAddr: uint64, numPages: uint64] =
+  let numPages = (width.uint64 * height.uint64 * 4 + (PageSize - 1)) div PageSize
+  let vmRegion = vmalloc(kspace, numPages)
   mapRegion(
     pml4 = getActivePML4(),
-    virtAddr = fbVMRegion.start,
+    virtAddr = vmRegion.start,
     physAddr = fbPhysAddr.PhysAddr,
     pageCount = numPages,
     pageAccess = paReadWrite,
     pageMode = pmSupervisor,
     noExec = true
   )
-  fbVirtAddr = fbVMRegion.start.uint64
+  result = (vmRegion.start.uint64, numPages)
 
-  logger.info &"  ...mapped {numPages} pages of video memory @ {fbVirtAddr:#x}"
+proc unmapFramebuffer*(virtAddr, numPages: uint64) =
+    unmapRegion(
+      pml4 = getActivePML4(),
+      virtAddr = virtAddr.VirtAddr,
+      pageCount = numPages,
+    )
 
-  var fb = cast[ptr UncheckedArray[uint32]](fbVirtAddr)
+proc setResolution*(xres, yres: uint16) =
+  logger.info &"setting resolution to {xres}x{yres}"
+  bgaSetVideoMode(xres, yres, 32)
 
-  for i in 0 ..< yres.uint32:
-    let xoffset = i * xres
-    for j in 0 ..< xres.uint32:
-      fb[xoffset + j] = 0x608aaf'u32
+  let virtWidth = bgaReadRegister(BgaPortIndexVirtWidth)
+  let virtHeight = bgaReadRegister(BgaPortIndexVirtHeight)
+  logger.info &"  ...virtual resolution = {virtWidth}x{virtHeight}"
+
+  if fbVirtAddr != 0:
+    logger.info &"  ...unmapping old framebuffer"
+    unmapFramebuffer(fbVirtAddr, fbNumPages)
+
+  (fbVirtAddr, fbNumPages) = mapFramebuffer(virtWidth, virtHeight)
+  logger.info &"  ...mapped {fbNumPages} pages of video memory @ {fbVirtAddr:#x}"
