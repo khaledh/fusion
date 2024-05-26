@@ -162,7 +162,7 @@ proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPrior
   var isf = cast[ptr InterruptStackFrame](isfAddr)
   isf.ss = 0  # kernel ss selector must be null
   isf.rsp = cast[uint64](kstack.bottom)
-  isf.rflags = cast[uint64](0x202)
+  isf.rflags = cast[uint64](0x002)  # disable interrupts on entry
   isf.cs = cast[uint64](KernelCodeSegmentSelector)
   isf.rip = cast[uint64](kernelTaskWrapper)
 

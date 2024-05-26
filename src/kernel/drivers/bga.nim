@@ -108,5 +108,6 @@ proc setResolution*(xres, yres: uint16) =
   var fb = cast[ptr UncheckedArray[uint32]](fbVirtAddr)
 
   for i in 0 ..< yres.uint32:
+    let xoffset = i * xres
     for j in 0 ..< xres.uint32:
-      fb[i * xres + j] = 0x608aaf'u32
+      fb[xoffset + j] = 0x608aaf'u32
