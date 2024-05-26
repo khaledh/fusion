@@ -8,7 +8,7 @@ import sched
 
 const
   TimerVector = 0x20
-  TimerDurationMs = 10  # milliseconds
+  TimerDurationMs = 20  # milliseconds
 
 type
   TimerCallback* = proc ()

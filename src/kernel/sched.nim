@@ -11,11 +11,13 @@ import taskdef
 
 let logger = DebugLogger(name: "sched")
 
+proc cmpPriority(a, b: Task): bool {.inline.} =
+  a.priority > b.priority
+
 var
-  readyTasks = initHeapQueue[Task]()
+  readyTasks = initHeapQueue[Task](cmp = cmpPriority)
   currentTask {.exportc.}: Task
 
-proc `<`(a, b: Task): bool = a.priority > b.priority
 proc `==`(a, b: Task): bool = a.id == b.id
 
 proc getCurrentTask*(): Task = currentTask

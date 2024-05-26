@@ -19,13 +19,13 @@ import vmm
 let
   logger = DebugLogger(name: "taskmgr")
 
+proc cmpSleepUntil(a, b: Task): bool {.inline.} =
+  a.sleepUntil < b.sleepUntil
+
 var
   tasks = newSeq[Task]()
-  sleepers = initHeapQueue[Task]()
+  sleepers = initHeapQueue[Task](cmp = cmpSleepUntil)
   nextTaskId: uint64 = 0
-
-proc `<`(a, b: Task): bool = a.sleepUntil < b.sleepUntil
-
 
 proc taskmgrInit*() =
   timer.registerCallback(wakeupTasks)
@@ -240,8 +240,12 @@ proc wakeupTasks*() =
     return
 
   let now = getCurrentTicks()
+
   # logger.info &"waking up tasks, sleepers.len: {sleepers.len}"
-  # logger.info &"now: {now}, sleepers[0].sleepUntil: {sleepers[0].sleepUntil}"
+  # logger.info &"now: {now}"
+  # for i in 0 ..< sleepers.len:
+  #   logger.info &"sleepers[{i}].id: {sleepers[i].id}, sleepers[{i}].sleepUntil: {sleepers[i].sleepUntil}"
+
   while sleepers.len > 0 and sleepers[0].sleepUntil <= now:
     let task = sleepers.pop()
     logger.info &"waking up task {task.id}"
