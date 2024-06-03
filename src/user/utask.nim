@@ -17,7 +17,7 @@ proc UserMain*(param: int) {.exportc.} =
   # let paramStr = $param
   # print(paramStr.addr)
 
-  let tid = os.getTaskId()
+  # let tid = os.getTaskId()
 
   var data = recv(chid = 0)
   var datastr = $data

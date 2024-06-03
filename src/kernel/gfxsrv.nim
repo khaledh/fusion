@@ -2,7 +2,13 @@
   Graphics server
 ]#
 
+import std/bitops
+
+import cpu
 import drivers/bga
+import drivers/vmsvga
+import font as fnt
+import lapic
 import taskmgr
 
 {.experimental: "codeReordering".}
@@ -11,8 +17,8 @@ let
   logger = DebugLogger(name: "gfxsrv")
 
 const
-  XRes = 1400  # or 1600
-  YRes = 1050  #    1200
+  XRes = 1600'u32
+  YRes = 1200'u32
 
   DefaultBackground = 0x608aaf'u32
 
@@ -21,32 +27,256 @@ var
   buffer0: ptr UncheckedArray[uint32]
   buffer1: ptr UncheckedArray[uint32]
   backBuffer: ptr UncheckedArray[uint32]
+  font: Font
 
 proc start*()  {.cdecl.} =
   logger.info "starting graphics server"
 
-  bga.setResolution(XRes, YRes)
-  fb = bga.getFramebuffer()
+  font = loadFont()
+
+  vmsvga.setMode(XRes, YRes, 32)
+  fb = vmsvga.getFrameBuffer()
+  logger.info &"fb: {cast[uint64](fb):#x}"
 
   buffer0 = fb
   buffer1 = fb +! uint64(XRes * YRes * 4)
-  backBuffer = buffer1
+  logger.info &"buffer0: {cast[uint64](buffer0):#x}"
+  logger.info &"buffer1: {cast[uint64](buffer1):#x}"
+  backBuffer = buffer0
 
   # set the back buffer to the default background color
   for i in 0 ..< YRes.uint32 * Xres.uint32:
-    backBuffer[i] = DefaultBackground
+    fb[i] = DefaultBackground
 
-  swapBuffers()
 
-  # suspend ourselves for now
-  suspend()
+  # draw a 3d button at the bottom of screen
 
-proc swapBuffers*() =
-  if backBuffer == buffer0:
-    bgaSetYOffset(0)
-    backBuffer = buffer1
-    copyMem(buffer1, buffer0, XRes * YRes * 4)
-  else:
-    bgaSetYOffset(YRes)
-    backBuffer = buffer0
-    copyMem(buffer0, buffer1, XRes * YRes * 4)
+  let
+    left = 0'u32
+    top = YRes - 35
+    width = XRes
+    height = 35'u32
+    bottom = top + height
+    right = left + width
+  
+  # 1. draw the full rectangle with a light gray color
+  vmsvga.rectFill(left, top, width, height, 0xBFBFBF'u32)
+
+  # draw a 2-pixel, white top and left border
+  vmsvga.rectFill(left, top, width, 2, 0xf0f0f0'u32)
+  # vmsvga.rectFill(left, top, 2, height, 0xffffff'u32)
+  # draw a 2-pixel, black bottom and right border
+  # vmsvga.rectFill(0, bottom - 2, width, 2, 0x7f7f7f'u32)
+  # vmsvga.rectFill(right - 2, top, 2, 30, 0x7f7f7f'u32)
+  # draw a 2-pixel, dark gray inner bottom and right border
+  # vmsvga.rectFill(left + 2, bottom - 4, width - 4, 2, 0x7F7F7F'u32)
+  # vmsvga.rectFill(right - 4, top + 2, 2, height - 4, 0x7F7F7F'u32)
+  updateRegion(Region(x: 0, y: YRes - 30, width: XRes, height: 30))
+
+  drawWindow()
+
+  putText(304, 334, """
+  _____          _                ___  ____  
+ |  ___|   _ ___(_) ___  _ __    / _ \/ ___| 
+ | |_ | | | / __| |/ _ \| '_ \  | | | \___ \ 
+ |  _|| |_| \__ \ | (_) | | | | | |_| |___) |
+ |_|   \__,_|___/_|\___/|_| |_|  \___/|____/ 
+""", 0xffffff, 0)
+  updateRegion(Region(x: 0, y: 0, width: XRes, height: YRes))
+
+  var fps = 0
+  var originTicks = readTSC()
+  # var actualSleepTicks = 0
+
+  for i in 0 .. 1000:
+    # logger.info ""
+    let startTicks = readTSC()
+
+    # slightly change color every iteration to make a rainbow
+    if i mod 10 == 0:
+      let textcolor = 0xc2d4e6'u32 + i.uint32 * 0x10_00_00'u32
+      putText(312, 334 + 16 * 6, """Welcome to FusionOS!""", textcolor, 0)
+      updateRegion(Region(x: 4, y: 4 + 16 * 6, width: 200, height: 16))
+
+    # let color = if i mod 2 == 0: 0xff0000'u32 else: 0x0000ff'u32
+    let color = 0xcccccc'u32
+    let r = draw(color)
+    updateRegion(r)
+    # swapBuffers()
+    # for k in 0 .. 1_000_000:
+    #   discard
+    # if i == 6:
+    #   quit()
+
+    let endTicks = readTSC()
+
+    let ticks = endTicks - startTicks
+    # logger.info &"frame ticks: {grouped(ticks)}"
+    # let fms = ticks.float / tscFreq.float * 1000
+    # let ms = uint64(fms)
+    let ms = ticksToDuration(ticks)
+    # logger.info &"frame took {ms} ms"
+    if ms < 16:
+      let sleepDuration: uint64 = 16 - ms
+      # logger.info &"sleepDuration: {sleepDuration} ms"
+      if sleepDuration > 0:
+        # let sleepStartTicks = readTSC()
+        # logger.info &"sleeping for {sleepDuration} ms"
+        sleep(sleepDuration)
+        # let sleepEndTicks = readTSC()
+        # let sleepTicks = sleepEndTicks - sleepStartTicks
+        # logger.info &"sleepTicks: {grouped(sleepTicks)}"
+        # let sleepMs = ticksToDuration(sleepTicks)
+        # logger.info &"slept for {sleepMs} ms"
+        # inc actualSleepTicks, sleepTicks
+
+    let finalTicks = readTSC()
+    let iterTicks = finalTicks - startTicks
+    # logger.info &"iterTicks: {grouped(iterTicks)}"
+    let accumTicks = finalTicks - originTicks
+    # logger.info &"accumTicks: {grouped(accumTicks)}"
+    if accumTicks < tscFreq:
+      inc fps
+    else:
+      # display fps at the top-right corner
+      putText(XRes - 70, 4, &"fps: {fps}", 0x111111'u32)
+      updateRegion(Region(x: XRes - 70, y: 4, width: 7*8, height: 16))
+
+      logger.info &"fps: {fps}"
+      fps = 0
+      originTicks = finalTicks
+      # logger.info &"actualSleepTicks: {grouped(actualSleepTicks)}"
+      # actualSleepTicks = 0
+
+proc drawWindow() =
+  let
+    left = 300'u32
+    top = 300'u32
+    width = 600'u32
+    height = 400'u32
+    bottom = top + height
+    right = left + width
+
+  # 1. draw the full rectangle with a light gray color
+  vmsvga.rectFill(left, top, width, height, 0xcfcfcf'u32)
+
+  # draw a 1-pixel, white top and left border
+  vmsvga.rectFill(left + 1, top + 1, width - 2, 2, 0xffffff'u32)
+  vmsvga.rectFill(left + 1, top + 1, 1, height - 2, 0xffffff'u32)
+  # draw a 1-pixel, dark gray bottom and right border
+  vmsvga.rectFill(left, bottom - 1, width, 1, 0x404040'u32)
+  vmsvga.rectFill(right - 1, top, 1, height, 0x404040'u32)
+  # draw a 1-pixel, light gray inner bottom and right border
+  vmsvga.rectFill(left + 1, bottom - 2, width - 2, 1, 0x7f7f7f'u32)
+  vmsvga.rectFill(right - 2, top + 1, 1, height - 2, 0x7f7f7f'u32)
+
+  # draw client area
+  let clientLeft = left + 4
+  let clientTop = top + 32
+  let clientWidth = width - 8
+  let clientHeight = height - 32 - 4
+  let clientBottom = clientTop + clientHeight
+  let clientRight = clientLeft + clientWidth
+
+  vmsvga.rectFill(clientLeft, clientTop, clientWidth, clientHeight, 0'u32)
+  # draw a 1-pixel, light gray top and left border
+  vmsvga.rectFill(clientLeft, clientTop, clientWidth, 1, 0xafafaf'u32)
+  vmsvga.rectFill(clientLeft, clientTop, 1, clientHeight, 0xafafaf'u32)
+  # draw a 1-pixel, dark gray inner top and left border
+  vmsvga.rectFill(clientLeft + 1, clientTop + 1, clientWidth - 2, 1, 0x404040'u32)
+  vmsvga.rectFill(clientLeft + 1, clientTop + 1, 1, clientHeight - 2, 0x404040'u32)
+
+  # draw a 1-pixel, white bottom and right border
+  vmsvga.rectFill(clientLeft, clientBottom - 1, clientWidth, 1, 0xffffff'u32)
+  vmsvga.rectFill(clientRight - 1, clientTop, 1, clientHeight, 0xffffff'u32)
+  # draw a 1-pixel, light gray inner bottom and right border
+  vmsvga.rectFill(clientLeft + 1, clientBottom - 2, clientWidth - 2, 1, 0xcfcfcf'u32)
+  vmsvga.rectFill(clientRight - 2, clientTop + 1, 1, clientHeight - 2, 0xcfcfcf'u32)
+
+  # draw a blue title bar
+  let titleBarTop = top + 4
+  let titleBarLeft = left + 5
+  let titleBarWidth = width - 10
+  let titleBarHeight = 24'u32
+  let titleBarBottom = titleBarTop + titleBarHeight
+  let titleBarRight = titleBarLeft + titleBarWidth
+
+  vmsvga.rectFill(titleBarLeft, titleBarTop, titleBarWidth, titleBarHeight, 0x48669E'u32)
+  vmsvga.update(Region(x: left, y: top, width: width, height: height))
+  # vmsvga.sync()
+  for i in 0 ..< 10_000_000:
+    discard
+
+  # draw title
+  logger.info &"titleBarLeft = {titleBarLeft}, titleBarTop = {titleBarTop}"
+  putText(titleBarLeft + 4, titleBarTop + 4, "FusionOS", 0xffffff'u32, 0x48669E'u32)
+
+  # vmsvga.update(Region(x: left, y: top, width: width, height: height))
+  vmsvga.update(Region(x: 0, y: 0, width: XRes, height: YRes))
+
+
+var
+  margin: uint32 = 304
+  left: uint32 = margin + 12
+  top: uint32 = 338 + 16 * 7
+  width: uint32 = 40
+  height: uint32 = 10
+  direction: int32 = 1
+
+let
+  xdelta = 4'u32
+  ydelta = 0'u32
+
+proc draw(color: uint32): Region =
+  # clear old box  
+  vmsvga.rectFill(left, top, width, height, 0)
+
+  if left + width >= margin + 170 or left < margin + 12:
+    direction = -direction
+
+  inc left, xdelta.int * direction
+  inc top, ydelta.int * direction
+
+  # draw a box
+  vmsvga.rectFill(left, top, width, height, color)
+
+  result = Region(
+    x: left - uint32((xdelta + 2).int * direction),
+    y: top - 2,
+    width: width,
+    height: height + 4,
+  )
+  # logger.info &"result: {result}"
+
+# proc swapBuffers*() =
+#   if backBuffer == buffer0:
+#     # bgaSetYOffset(0)
+#     backBuffer = buffer1
+#   else:
+#     # bgaSetYOffset(YRes)
+#     backBuffer = buffer0
+#   vmsvga.swapBuffers()
+
+proc updateRegion(r: Region) =
+  vmsvga.update(r)
+
+proc putPixel*(x, y: uint32, color: uint32) {.inline.} =
+  backBuffer[y * XRes + x] = color
+
+proc putChar*(x, y: uint32, ch: char, fg: uint32 = 0xffffff, bg: uint32 = DefaultBackground) =
+  let glyph = font.glyphs[ch.uint8]
+  for yoff, rowBits in glyph:
+    for xoff in 1..8:
+      let clr = if (rotateLeftBits(rowBits, xoff) and 1) == 1: fg else: bg
+      putPixel(x + xoff.uint32, y + yoff.uint32, clr.uint32)
+
+proc putText*(x, y: uint32, text: string, fg: uint32 = 0xffffff, bg: uint32 = DefaultBackground) =
+  var xstart = x
+  var ystart = y
+  for ch in text:
+    if ch == '\n':
+      xstart = x
+      inc ystart, font.height.uint32
+    else:
+      putChar(xstart, ystart, ch, fg, bg)
+      inc xstart, font.width.uint32

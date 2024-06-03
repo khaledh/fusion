@@ -32,7 +32,7 @@ proc unhandledException*(e: ref Exception)
 # Kernel entry point
 ####################################################################################################
 
-proc KernelMain(bootInfo: ptr BootInfo) {.exportc.} =
+proc KernelMain(bootInfo: ptr BootInfo) {.exportc, stackTrace:off.} =
   NimMain()
 
   try:
@@ -79,6 +79,7 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
 
   pci.showPciConfig()
   devmgrInit()
+  # quit()
 
   logger.info "init timer"
   timerInit()
@@ -95,26 +96,26 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
 
   let gfxTask = createKernelTask(gfxsrv.start, "gfxsrv")
 
-  var utask1 = createUserTask(
-    imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
-    imagePageCount = bootInfo.userImagePages,
-    name = "utask1",
-  )
-  var utask2 = createUserTask(
-    imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
-    imagePageCount = bootInfo.userImagePages,
-    name = "utask2",
-  )
+  # var utask1 = createUserTask(
+  #   imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
+  #   imagePageCount = bootInfo.userImagePages,
+  #   name = "utask1",
+  # )
+  # var utask2 = createUserTask(
+  #   imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
+  #   imagePageCount = bootInfo.userImagePages,
+  #   name = "utask2",
+  # )
 
   logger.info "adding tasks to scheduler"
   sched.addTask(idleTask)
   sched.addTask(gfxTask)
-  sched.addTask(utask1)
-  sched.addTask(utask2)
+  # sched.addTask(utask1)
+  # sched.addTask(utask2)
 
-  logger.info "creating a channel"
-  let ch = newChannel()
-  send(ch.id, 1010)
+  # logger.info "creating a channel"
+  # let ch = newChannel()
+  # send(ch.id, 1010)
 
   logger.info "starting scheduler"
   sched.schedule()

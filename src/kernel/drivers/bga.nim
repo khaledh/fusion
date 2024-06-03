@@ -63,16 +63,16 @@ proc pciInit*(dev: PciDeviceConfig) =
   fbPhysAddr = dev.bar[0]
 
   logger.info &"  ...id = {bgaId:0>4x}"
-  logger.info &"  ...framebuffer physical address = {fbPhysAddr:0>16x}"
+  logger.info &"  ...framebuffer physical address = 0x{fbPhysAddr:0>16x}"
 
 proc getFramebuffer*(): ptr UncheckedArray[uint32] =
   cast[ptr UncheckedArray[uint32]](fbVirtAddr)
 
-proc bgaWriteRegister(index, value: uint16) =
+proc bgaWriteRegister(index, value: uint16) {.inline.} =
   portOut16(BgaPortIndex, index)
   portOut16(BgaPortValue, value)
 
-proc bgaReadRegister*(index: uint16): uint16 =
+proc bgaReadRegister*(index: uint16): uint16 {.inline.} =
   portOut16(BgaPortIndex, index)
   portIn16(BgaPortValue)
 
@@ -83,8 +83,9 @@ proc bgaSetVideoMode*(width, height, bpp: uint16) =
   bgaWriteRegister(BgaPortIndexBpp, bpp)
   bgaWriteRegister(BgaPortIndexEnable, BgaEnabled or BgaLfbEnabled)
 
-proc bgaSetYOffset*(offset: uint16) =
+proc bgaSetYOffset*(offset: uint16) {.inline.} =
   bgaWriteRegister(BgaPortIndexYOffset, offset)
+  # discard
 
 proc mapFramebuffer*(width, height: uint32): tuple[virtAddr: uint64, numPages: uint64] =
   let numPages = (width.uint64 * height.uint64 * 4 + (PageSize - 1)) div PageSize

@@ -78,3 +78,26 @@ template `-!`*[T](p: ptr T, offset: int64): ptr T =
     cast[ptr T](cast[uint64](p) - abs(offset).uint64)
   else:
     p +! offset.uint64
+
+
+# string formatting
+
+proc grouped*(n: SomeInteger): string {.inline.} =
+  return $n
+  # Format a number with commas using div and mod operations
+  # result = $n
+  # var i = result.len
+  # while i > 3:
+  #   result = result[0..i-4] & "," & result[i-3..^1]
+  #   i -= 3
+
+proc float2str*(f: float, places: int): string =
+  var intPart = int(f)
+  var fracPart = f - float(intPart)
+  var fracStr = ""
+  for i in 0 ..< places:
+    fracPart *= 10
+    var digit = int(fracPart)
+    fracStr.add(chr(digit + ord('0')))
+    fracPart -= float(digit)
+  result = $intPart & "." & fracStr

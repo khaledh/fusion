@@ -7,6 +7,8 @@ import std/algorithm
 import cpu
 import pit
 
+{.experimental: "codeReordering".}
+
 type
   IA32ApicBaseMsr {.packed.} = object
     reserved1   {.bitsize:  8.}: uint64
@@ -56,6 +58,9 @@ type
     SendPending = 1 shl 12
 
 let
+  SpuriousInterruptVector = 0xff'u32
+
+let
   logger = DebugLogger(name: "lapic")
 
 var
@@ -65,25 +70,26 @@ proc getBasePhysAddr*(): uint32 =
   let baseMsr = cast[Ia32ApicBaseMsr](readMSR(IA32_APIC_BASE))
   result = (baseMsr.baseAddress shl 12).uint32
 
-proc lapicInit*(baseAddr: uint64) =
-  baseAddress = baseAddr
-
-proc readRegister(offset: int): uint32 =
+proc readRegister(offset: int): uint32  {.inline.} =
   result = cast[ptr uint32](baseAddress + offset.uint16)[]
 
-proc readRegister(offset: LapicOffset): uint32 =
+template readRegister(offset: LapicOffset): uint32 =
   readRegister(offset.int)
 
-proc writeRegister(offset: int, value: uint32) =
+proc writeRegister(offset: int, value: uint32)  {.inline.} =
   cast[ptr uint32](baseAddress + offset.uint16)[] = value
 
 template writeRegister(offset: LapicOffset, value: uint32) =
   writeRegister(offset.int, value)
 
-proc eoi*() =
+proc eoi*() {.inline.} =
   ## End of Interrupt
   writeRegister(LapicOffset.Eoi, 0)
 
+proc lapicInit*(baseAddr: uint64) =
+  baseAddress = baseAddr
+  # enable APIC
+  writeRegister(LapicOffset.SpuriousInterrupt, SpuriousInterruptVector or 0x100)
 
 #############
 # APIC Timer
@@ -101,21 +107,23 @@ type
     DivideBy1   = 0b1011
 
 const
-  TimerDivideBy = DivideBy16
-  TimerDivisor = 16
+  TimerDivideBy = DivideBy64
+  TimerDivisor = 64
 
 var
   timerFreq: uint64
-  tscFreq: uint64
+  tscFreq*: uint64
 
 proc durationToTicks*(durationMs: uint64): uint64 {.inline.} =
   result = tscFreq * durationMs div 1000
+  # logger.info &"duration {durationMs} ms = {grouped(result)} ticks"
 
-proc getCurrentTicks*(): uint64 {.inline.} =
-  result = readTSC()
+proc ticksToDuration*(ticks: uint64): uint64 {.inline.} =
+  result = (ticks * 1000 + (tscFreq - 1)) div tscFreq
+  # logger.info &"ticks {grouped(ticks)} = {result} ms"
 
 proc getFutureTicks*(durationMs: uint64): uint64 {.inline.} =
-  result = getCurrentTicks() + durationToTicks(durationMs)
+  result = readTSC() + durationToTicks(durationMs)
 
 
 proc calcFrequency(): tuple[timerFreq: uint32, tscFreq: uint64] =
@@ -149,33 +157,52 @@ proc calcFrequency(): tuple[timerFreq: uint32, tscFreq: uint64] =
 
   # calculate the timer frequency
   let timerFreq = (apicTickCount div pitInterval.uint32) * 1000 * TimerDivisor
-  # logger.info &"timer frequency: {timerFreq} Hz"
+  logger.info &"timer frequency: {timerFreq} Hz"
 
   # calculate TSC frequency
   let tscFreq = (tscTickCount div pitInterval.uint32) * 1000
-  # logger.info &"core frequency: {tscFreq} Hz"
+  logger.info &"core frequency: {tscFreq} Hz"
 
   result = (timerFreq, tscFreq)
 
 proc setTimer*(vector: uint8, durationMs: uint32) =
-  logger.info "calculating apic timer frequency"
+  logger.info "starting apic timer"
 
-  var timerFreqs: array[5, uint32]
-  var tscFreqs: array[5, uint64]
-  for i in 0 ..< timerFreqs.len:
-    (timerFreqs[i], tscFreqs[i]) = calcFrequency()
+  (tscFreq, timerFreq) = cpu.getCpuidFreq()
+  logger.info &"  ...apic frequency: {grouped(timerFreq)} Hz"
+  logger.info &"  ...tsc frequency: {grouped(tscFreq)} Hz"
 
-  # discard lowest and highest values
-  sort(timerFreqs)
-  timerFreq = (timerFreqs[1] + timerFreqs[2] + timerFreqs[3]) div 3
-  logger.info &"  ...apic timer frequency: {timerFreq} Hz"
+  # var timerFreqs: array[7, uint32]
+  # var tscFreqs: array[7, uint64]
+  # for i in 0 ..< timerFreqs.len:
+  #   (timerFreqs[i], tscFreqs[i]) = calcFrequency()
 
-  sort(tscFreqs)
-  tscFreq = (tscFreqs[1] + tscFreqs[2] + tscFreqs[3]) div 3
-  logger.info &"  ...tsc frequency: {tscFreq} Hz"
+  # # discard lowest and highest values
+  # sort(timerFreqs)
+  # var sumTimerFreqs = 0'u64
+  # logger.info &"  ...timer frequencies: {timerFreqs}"
+  # for i in 1 ..< timerFreqs.high:
+  #   inc sumTimerFreqs, timerFreqs[i]
+  # timerFreq = sumTimerFreqs div (timerFreqs.len - 2)
+  # logger.info &"  ...apic timer frequency: {grouped(timerFreq)} Hz"
+  # # override manually
+  # timerFreq = 1_000_000_000
 
-  logger.info &"  ...setting apic timer interval to {durationMs} ms (vector {vector:#x})"
+  # sort(tscFreqs)
+  # tscFreqs[0] = 0
+  # for i in 1 ..< tscFreqs.high:
+  #   inc tscFreqs[0], tscFreqs[i]
+  # tscFreq = tscFreqs[0] div (tscFreqs.len - 2)
+  # logger.info &"  ...tsc frequency: {grouped(tscFreq)} Hz"
+  # # override manually
+  # tscFreq = 2_800_000_000'u64
+
   let initialCount = uint32((timerFreq * durationMs) div (1000 * TimerDivisor))
+
+  logger.info "  ...setting apic timer interval to:"
+  logger.info &"    duration: {durationMs} ms"
+  logger.info &"    initial count: {grouped(initialCount)} (divisor: {TimerDivisor})"
+  logger.info &"    vector: {vector:#x}"
 
   writeRegister(LapicOffset.LvtTimer, vector.uint32 or TimerMode.Periodic.uint32)
   writeRegister(LapicOffset.TimerDivideConfig, TimerDivideBy.uint32)

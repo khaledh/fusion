@@ -35,6 +35,13 @@ proc writeMSR*(ecx: uint32, value: uint64) =
     : "c"(`ecx`), "a"(`eax`), "d"(`edx`)
   """
 
+proc cpuid*(eax, ebx, ecx, edx: ptr uint32) =
+  asm """
+    cpuid
+    :"=a"(*`eax`), "=b"(*`ebx`), "=c"(*`ecx`), "=d"(*`edx`)
+    :"a"(*`eax`)
+  """
+
 proc readTSC*(): uint64 =
   var eax, edx: uint32
   asm """
@@ -42,6 +49,18 @@ proc readTSC*(): uint64 =
     : "=a"(`eax`), "=d"(`edx`)
   """
   result = (edx.uint64 shl 32) or eax
+
+proc getCpuidFreq*(): tuple[tscFreq: uint32, apicFreq: uint32] =
+  # get the local apic frequency and tsc frequency
+  # on real machines: leaf 0x16
+  # on virtual machines: leaf 0x40000010
+  var eax, ebx, ecx, edx: uint32
+  eax = 0x40000010
+  cpuid(addr eax, addr ebx, addr ecx, addr edx)
+  result = (
+    eax * 1_000,  # TSC frequency (convert KHz to Hz)
+    ebx * 1_000,  # APIC frequency (convert KHz to Hz)
+  )
 
 proc idle*() {.cdecl.} =
   while true:

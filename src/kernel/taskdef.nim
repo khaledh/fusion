@@ -16,6 +16,7 @@ type
     id*: uint64
     name*: string
     priority*: TaskPriority
+    ticksRemaining*: uint64
     state*: TaskState
     sleepUntil*: uint64  # based on apic timer count
     # user task fields

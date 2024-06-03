@@ -5,6 +5,7 @@
 import std/heapqueue
 
 import common/pagetables
+import cpu
 import lapic
 import loader
 import gdt
@@ -209,8 +210,10 @@ proc suspend*() =
 
 proc sleep*(durationMs: uint64) =
   var task = sched.getCurrentTask()
-  logger.info &"task {task.id} sleeping for {durationMs} ms"
+  # logger.info &"task {task.id} sleeping for {durationMs} ms"
+  # logger.info &"current ticks: {grouped(readTSC())}"
   task.sleepUntil = getFutureTicks(durationMs)
+  # logger.info &"sleeping until: {grouped(task.sleepUntil)}"
   task.state = TaskState.Sleeping
   sleepers.push(task)
   sched.removeTask(task)
@@ -235,11 +238,12 @@ proc resume*(task: Task) =
   sched.addTask(task)
 
 
-proc wakeupTasks*() =
+proc wakeupTasks() {.cdecl.} =
+  let now = readTSC()
+  # logger.info &"wakeupTasks, now: {now}"
+
   if sleepers.len == 0:
     return
-
-  let now = getCurrentTicks()
 
   # logger.info &"waking up tasks, sleepers.len: {sleepers.len}"
   # logger.info &"now: {now}"
@@ -247,7 +251,9 @@ proc wakeupTasks*() =
   #   logger.info &"sleepers[{i}].id: {sleepers[i].id}, sleepers[{i}].sleepUntil: {sleepers[i].sleepUntil}"
 
   while sleepers.len > 0 and sleepers[0].sleepUntil <= now:
+    # logger.info &"sleepers[0].id: {sleepers[0].id}, sleepers[0].sleepUntil: {grouped(sleepers[0].sleepUntil)}"
     let task = sleepers.pop()
-    logger.info &"waking up task {task.id}"
+    # logger.info &"task {task.id} delta: {grouped(now - task.sleepUntil)}"
+    # logger.info &"waking up task {task.id}"
     task.state = TaskState.Ready
     sched.addTask(task)

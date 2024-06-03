@@ -46,13 +46,15 @@ run *QEMU_ARGS: bootloader kernel user
   @git restore ovmf/OVMF_VARS.fd
 
   @echo ""
-  -qemu-system-x86_64 \
+  -qemu-kvm \
     -drive if=pflash,format=raw,file={{ovmf_code}},readonly=on \
     -drive if=pflash,format=raw,file={{ovmf_vars}} \
     -drive format=raw,file=fat:rw:{{disk_image_dir}} \
     -machine q35 \
     -net none \
     -no-reboot \
+    -cpu host,+invtsc,+vmware-cpuid-freq \
+    -vga vmware \
     -debugcon stdio {{QEMU_ARGS}}
 
   @git restore ovmf/OVMF_VARS.fd

@@ -20,7 +20,7 @@ var
 
 proc `==`(a, b: Task): bool = a.id == b.id
 
-proc getCurrentTask*(): Task = currentTask
+proc getCurrentTask*(): Task {.inline.} = currentTask
 
 proc addTask*(t: Task) =
   if not currentTask.isNil and currentTask == t:
@@ -41,18 +41,23 @@ proc schedule*() =
     return
 
   if not currentTask.isNil and currentTask.state == Running:
+    if readyTasks.len == 1 and readyTasks[0].id == 0:
+      # only the idle task is ready, no need to switch
+      return
+
     if currentTask.priority > readyTasks[0].priority:
       # the current task has higher priority than the next task
       # logger.info &"no higher priority task, scheduling same task"
       return
-    # put the current task back into the queue
+
+    # otherwise, put the current task back into the queue
     currentTask.state = TaskState.Ready
     readyTasks.push(currentTask)
 
   # switch to the task with the highest priority
   var nextTask = readyTasks.pop()
 
-  logger.info &"switching -> {nextTask.id}"
+  # logger.info &"switching -> {nextTask.id}"
 
   # if currentTask.isNil or currentTask.state == Terminated:
   #   logger.info &"switching -> {nextTask.id}"
