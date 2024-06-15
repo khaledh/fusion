@@ -33,6 +33,7 @@ let
 
 type
   Reg = enum
+    ## I/O port indices
     Id = 0
     Enable = 1
     Width = 2
@@ -69,6 +70,11 @@ type
     IrqMask = 33      # interrupt mask
 
 type
+  CmdId = enum
+    Update = 1
+    RectFill = 2
+    DefineCursor = 19
+
   CmdUpdate {.packed.} = object
     x: uint32
     y: uint32
@@ -81,6 +87,20 @@ type
     y: uint32
     width: uint32
     height: uint32
+
+  CmdDefineCursor {.packed.} = object
+    id: uint32
+    hotX: uint32
+    hotY: uint32
+    width: uint32
+    height: uint32
+    andMaskDepth: uint32
+    xorMaskDepth: uint32
+    data: array[8 * 48 * 2, byte]
+
+  CursorOnValue = enum
+    Hide = 0
+    Show = 1
 
   Region* = object
     x*: uint32
@@ -219,53 +239,57 @@ proc setMode*(width, height, bpp: uint32) =
 proc getFrameBuffer*(): ptr UncheckedArray[uint32] {.inline.} =
   return fb
 
-proc update*(r: Region) =
-  if nextCmdOffset + sizeof(uint32).uint32 + sizeof(CmdUpdate).uint32 >= fifo[FifoMax]:
+template enqueue*(id: CmdId, typ: untyped, body: untyped) =
+  if nextCmdOffset + sizeof(uint32).uint32 + sizeof(typ).uint32 >= fifo[FifoMax]:
     nextCmdOffset = fifo[FifoMin]
 
   let cmdOffset = nextCmdOffset
 
-  # logger.info &"fifo = {cast[uint64](fifo):#010x}"
-  # logger.info &"nextCmdOffset = {nextCmdOffset:#010x}"
-  fifo[nextCmdOffset div 4] = CmdUpdateValue
+  fifo[nextCmdOffset div 4] = id.uint32
   inc nextCmdOffset, sizeof(uint32)
-  # logger.info &"nextCmdOffset = {nextCmdOffset:#010x}"
-  var cmd = cast[ptr CmdUpdate](fifo +! nextCmdOffset)
-  inc nextCmdOffset, sizeof(CmdUpdate)
-  # logger.info &"nextCmdOffset = {nextCmdOffset:#010x}"
+  var cmd {.inject.} = cast[ptr typ](fifo +! nextCmdOffset)
+  inc nextCmdOffset, sizeof(typ)
 
-  # logger.info &"cmd @ {cast[uint64](cmd):#010x}"
-
-  cmd.x = r.x
-  cmd.y = r.y
-  cmd.width = r.width
-  cmd.height = r.height
+  body
 
   fifo[FifoNextCmd] = cmdOffset
 
-  # dump first 10 dwords of fifo
-  # for i in 0 ..< 10:
-  #   logger.info &"fifo[{i}] = {fifo[i]:#010x}"
+proc update*(r: Region) =
+  enqueue(CmdId.Update, CmdUpdate):
+    cmd.x = r.x
+    cmd.y = r.y
+    cmd.width = r.width
+    cmd.height = r.height
 
 proc rectFill*(x, y, width, height, color: uint32) =
-  if nextCmdOffset + sizeof(uint32).uint32 + sizeof(CmdUpdate).uint32 >= fifo[FifoMax]:
-    nextCmdOffset = fifo[FifoMin]
+  enqueue(CmdId.RectFill, CmdRectFill):
+    cmd.color = color
+    cmd.x = x
+    cmd.y = y
+    cmd.width = width
+    cmd.height = height
 
-  let cmdOffset = nextCmdOffset
+proc defineCursor*(
+  id: uint32,
+  hotX, hotY: uint32,
+  width, height: uint32,
+  andMaskDepth, xorMaskDepth: uint32,
+  mask: array[48 * 8 * 2, byte]
+) =
+  logger.info &"defining cursor: id = {id}, hot = ({hotX}, {hotY}), size = ({width}, {height})"
+  enqueue(CmdId.DefineCursor, CmdDefineCursor):
+    cmd.id = id
+    cmd.hotX = hotX
+    cmd.hotY = hotY
+    cmd.width = width
+    cmd.height = height
+    cmd.andMaskDepth = andMaskDepth
+    cmd.xorMaskDepth = xorMaskDepth
+    for i in 0 ..< height * 8 * 2:
+      cmd.data[i] = mask[i]
 
-  fifo[nextCmdOffset div 4] = CmdRectFillValue
-  inc nextCmdOffset, sizeof(uint32)
-  var cmd = cast[ptr CmdRectFill](fifo +! nextCmdOffset)
-  inc nextCmdOffset, sizeof(CmdRectFill)
+proc enableCursor*() =
+  writeRegister(Reg.CursorOn, CursorOnValue.Show.uint32)
 
-  cmd.color = color
-  cmd.x = x
-  cmd.y = y
-  cmd.width = width
-  cmd.height = height
-
-  fifo[FifoNextCmd] = cmdOffset
-
-proc sync*() =
-  while readRegister(Reg.Busy) != 0:
-    discard
+proc disableCursor*() =
+  writeRegister(Reg.CursorOn, CursorOnValue.Hide.uint32)
