@@ -39,25 +39,25 @@ const
 var
   physicalMemoryVirtualBase: uint64
   pmalloc: PhysAlloc
-  kspace* = VMAddressSpace(
-    minAddress: KernelSpaceMinAddress,
-    maxAddress: KernelSpaceMaxAddress,
-    regions: @[],
-  )
-  uspace* = VMAddressSpace(
-    minAddress: UserSpaceMinAddress,
-    maxAddress: UserSpaceMaxAddress,
-    regions: @[],
-  )
+  kspace*: VMAddressSpace
+  uspace*: VMAddressSpace
 
-template `end`*(region: VMRegion): VirtAddr = (
+template `end`*(region: VMRegion): VirtAddr =
   region.start +! region.npages * PageSize
-)
-
 
 proc vmInit*(physMemoryVirtualBase: uint64, physAlloc: PhysAlloc) =
   physicalMemoryVirtualBase = physMemoryVirtualBase
   pmalloc = physAlloc
+  kspace = VMAddressSpace(
+    minAddress: KernelSpaceMinAddress,
+    maxAddress: KernelSpaceMaxAddress,
+    regions: @[],
+  )
+  uspace = VMAddressSpace(
+    minAddress: UserSpaceMinAddress,
+    maxAddress: UserSpaceMaxAddress,
+    regions: @[],
+  )
 
 proc vmAddRegion*(space: var VMAddressSpace, start: VirtAddr, npages: uint64) =
   space.regions.add VMRegion(start: start, npages: npages)

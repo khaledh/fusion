@@ -281,32 +281,33 @@ iterator enumeratePciBus*(bus: uint8): PciDeviceConfig {.closure.} =
       yield devConfig
 
 
+proc showPciDevice(dev: PciDeviceConfig) =
+  var line: string
+  line &= &"  {dev.bus:0>2x}:{dev.slot:0>2x}.{dev.fn} -> {dev.vendorId:0>4x}:{dev.deviceId:0>4x}"
+  line &= &" ({dev.classCode:0>2x}h,{dev.subClass:0>2x}h,{dev.progIF:0>2x}h)"
+  line &= &" interrupt: pin({dev.interruptPin}) line({dev.interruptLine: >3})"
+  line &= &" {dev.desc}"
+
+  for cap in dev.capabilities:
+      line &= &" {cap}"
+      # if cap.uint8 == 0x12: # Sata Data-Index Configuration
+      #   let revision = pciConfigRead16(bus, dev, fn, capOffset + 2)
+      #   logger.raw &" revision={(revision shr 4) and 0xf}.{revision and 0xf}"
+      #   let satacr1 = pciConfigRead16(bus, dev, fn, capOffset + 4)
+      #   logger.raw &" barloc={satacr1 and 0xf:0>4b}b, barofst={(satacr1 shr 4) and 0xfffff:0>5x}h"
+
+  # logger.info ""
+  # logger.info &"    BAR0: {dev.bar[0]:0>8x}h"
+  # logger.info &"    BAR1: {dev.bar[1]:0>8x}h"
+  # logger.info &"    BAR2: {dev.bar[2]:0>8x}h"
+  # logger.info &"    BAR3: {dev.bar[3]:0>8x}h"
+  # logger.info &"    BAR4: {dev.bar[4]:0>8x}h"
+  # logger.info &"    BAR5: {dev.bar[5]:0>8x}h"
+
+  logger.info line
+
 proc showPciConfig*() =
-
-  proc showPciDevice(dev: PciDeviceConfig) =
-    logger.raw &"  pci {dev.bus:0>2x}:{dev.slot:0>2x}.{dev.fn} -> {dev.vendorId:0>4x}:{dev.deviceId:0>4x}"
-    logger.raw &" {dev.classCode:0>2x}h,{dev.subClass:0>2x}h,{dev.progIF:0>2x}h)"
-    logger.raw &"  {dev.desc}, interrupt: pin({dev.interruptPin}) line({dev.interruptLine})"
-
-    for cap in dev.capabilities:
-        logger.raw &" {cap}"
-        # if cap.uint8 == 0x12: # Sata Data-Index Configuration
-        #   let revision = pciConfigRead16(bus, dev, fn, capOffset + 2)
-        #   logger.raw &" revision={(revision shr 4) and 0xf}.{revision and 0xf}"
-        #   let satacr1 = pciConfigRead16(bus, dev, fn, capOffset + 4)
-        #   logger.raw &" barloc={satacr1 and 0xf:0>4b}b, barofst={(satacr1 shr 4) and 0xfffff:0>5x}h"
-
-    # logger.info ""
-    # logger.info &"    BAR0: {dev.bar[0]:0>8x}h"
-    # logger.info &"    BAR1: {dev.bar[1]:0>8x}h"
-    # logger.info &"    BAR2: {dev.bar[2]:0>8x}h"
-    # logger.info &"    BAR3: {dev.bar[3]:0>8x}h"
-    # logger.info &"    BAR4: {dev.bar[4]:0>8x}h"
-    # logger.info &"    BAR5: {dev.bar[5]:0>8x}h"
-
-    logger.raw "\n"
-
-  logger.info "pci bus"
+  logger.info "pci bus 0"
 
   for dev in enumeratePciBus(0):
     showPciDevice(dev)
