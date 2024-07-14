@@ -1,6 +1,8 @@
 # Fusion OS
 
-Fusion is a hobby operating system for x86-64 implemented in Nim.
+
+Fusion is a hobby operating system for x86-64 implemented in Nim. I'm documenting
+the process of building it at: [https://0xc0ffee.netlify.app](https://0xc0ffee.netlify.app).
 
 ## Features
 
