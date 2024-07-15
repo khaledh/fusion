@@ -4,6 +4,20 @@
 Fusion is a hobby operating system for x86-64 implemented in Nim. I'm documenting
 the process of building it at: [https://0xc0ffee.netlify.app](https://0xc0ffee.netlify.app).
 
+## Screenshots
+
+**UEFI Bootloader**
+
+![UEFI Bootloader](screenshots/bootloader.png)
+
+**GUI** (_Note: This screenshot is from the `graphics` branch, which is still a work-in-progress._)
+
+![Screenshot from the graphics branch](screenshots/graphics.png)
+
+**Booting Fusion Kernel**
+
+![Booting Fusion Kernel](screenshots/kernel-booting.png)
+
 ## Features
 
 The following features are currently implemented:
