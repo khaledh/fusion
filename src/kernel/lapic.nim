@@ -54,9 +54,16 @@ type
   DeliveryStatus = enum
     Idle        = 0 shl 12
     SendPending = 1 shl 12
+  
+  SpuriousInterruptVectorRegister {.packed, size: sizeof(uint32).} = object
+    vector: uint8
+    apicEnabled {.bitsize: 1.}: uint8
 
 let
   logger = DebugLogger(name: "lapic")
+
+const
+  SpuriousInterruptVector = 0xff
 
 var
   baseAddress: uint64
@@ -65,24 +72,30 @@ proc getBasePhysAddr*(): uint32 =
   let baseMsr = cast[Ia32ApicBaseMsr](readMSR(IA32_APIC_BASE))
   result = (baseMsr.baseAddress shl 12).uint32
 
-proc lapicInit*(baseAddr: uint64) =
-  baseAddress = baseAddr
-
-proc readRegister(offset: int): uint32 =
+proc readRegister(offset: int): uint32 {.inline.} =
   result = cast[ptr uint32](baseAddress + offset.uint16)[]
 
-proc readRegister(offset: LapicOffset): uint32 =
+template readRegister(offset: LapicOffset): uint32 =
   readRegister(offset.int)
 
-proc writeRegister(offset: int, value: uint32) =
+proc writeRegister(offset: int, value: uint32) {.inline.} =
   cast[ptr uint32](baseAddress + offset.uint16)[] = value
 
 template writeRegister(offset: LapicOffset, value: uint32) =
   writeRegister(offset.int, value)
 
-proc eoi*() =
+proc eoi*() {.inline.} =
   ## End of Interrupt
   writeRegister(LapicOffset.Eoi, 0)
+
+proc lapicInit*(baseAddr: uint64) =
+  baseAddress = baseAddr
+  # enable APIC
+  let svr = SpuriousInterruptVectorRegister(
+    vector: SpuriousInterruptVector,
+    apicEnabled: 1,
+  )
+  writeRegister(LapicOffset.SpuriousInterrupt, cast[uint32](svr))
 
 
 #############

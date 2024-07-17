@@ -140,6 +140,8 @@ createHandler(cpuSimdFloatingPointExceptionHandler, "SIMD Floating Point Excepti
 createHandler(cpuVirtualizationExceptionHandler, "Virtualization Exception")
 createHandlerWithErrorCode(cpuControlProtectionExceptionHandler, "Control Protection Exception")
 
+createHandler(apicSpuriousInterruptHandler, "Local APIC Spurious Interrupt")
+
 proc idtInit*() =
   installHandler(0, cpuDivideErrorHandler)
   installHandler(1, cpuDebugErrorHandler)
@@ -162,6 +164,8 @@ proc idtInit*() =
   installHandler(19, cpuSimdFloatingPointExceptionHandler)
   installHandler(20, cpuVirtualizationExceptionHandler)
   installHandlerWithErrorCode(21, cpuControlProtectionExceptionHandler)
+
+  installHandler(0xff, apicSpuriousInterruptHandler)
 
   asm """
     lidt %0
