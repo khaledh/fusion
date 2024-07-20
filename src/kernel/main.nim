@@ -7,7 +7,6 @@ import channels
 import cpu
 import devmgr
 import drivers/pci
-import queues
 import idt
 import lapic
 import gfxsrv

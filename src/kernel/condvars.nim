@@ -7,19 +7,16 @@ import taskmgr
 
 type
   CondVar* = ref object of RootObj
-    lock: Lock
     waiters: Deque[Task]
+    lock: Lock
 
 proc newCondVar*(): CondVar =
-  result = CondVar(
-    lock: newMutex()
-  )
+  result = CondVar(lock: newMutex())
 
 proc wait*(cv: CondVar, wl: var Lock) =
   # lock the condvar while we add ourselves to the waiters list
-  cv.lock.acquire()
-  cv.waiters.addLast(getCurrentTask())
-  cv.lock.release()
+  withLock(cv.lock):
+    cv.waiters.addLast(getCurrentTask())
 
   # release the waiter lock and wait for a signal
   wl.release()
@@ -30,20 +27,14 @@ proc wait*(cv: CondVar, wl: var Lock) =
 
 proc signal*(cv: CondVar) =
   # lock the condvar while we (potentially) remove a waiter 
-  cv.lock.acquire()
-
-  # signal the first waiter (if any)
-  if cv.waiters.len > 0:
-    cv.waiters.popFirst().resume()
-
-  cv.lock.release()
+  withLock(cv.lock):
+    # signal the first waiter (if any)
+    if cv.waiters.len > 0:
+      cv.waiters.popFirst().resume()
 
 proc broadcast*(cv: CondVar) =
   # lock the condvar while we (potentially) remove all waiters
-  cv.lock.acquire()
-
-  # signal all waiters
-  while cv.waiters.len > 0:
-    cv.waiters.popFirst().resume()
-
-  cv.lock.release()
+  withLock(cv.lock):
+    # signal all waiters
+    while cv.waiters.len > 0:
+      cv.waiters.popFirst().resume()

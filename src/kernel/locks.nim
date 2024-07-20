@@ -28,6 +28,11 @@ method acquire*(l: Lock) {.base.} =
 method release*(l: Lock) {.base.} =
   raise newException(CatchableError, "Method without implementation override")
 
+template withLock*(l: var Lock, body: untyped) =
+  block:
+    l.acquire()
+    defer: l.release()
+    body
 
 ### SpinLock
 
