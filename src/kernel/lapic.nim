@@ -124,6 +124,9 @@ var
 proc durationToTicks*(durationMs: uint64): uint64 {.inline.} =
   result = tscFreq * durationMs div 1000
 
+proc ticksToDuration*(ticks: uint64): uint64 {.inline.} =
+  result = ticks * 1000 div tscFreq
+
 proc getCurrentTicks*(): uint64 {.inline.} =
   result = readTSC()
 

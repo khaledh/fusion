@@ -5,6 +5,7 @@
 import common/[bootinfo, libc, malloc, pagetables]
 import channels
 import cpu
+import ctxswitch
 import devmgr
 import drivers/pci
 import idt
@@ -88,12 +89,16 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.info "init task manager"
   taskmgrInit()
 
+  logger.info "creating a channel [for testing]"
+  let ch = newChannel()
+  send(ch.id, 1010)
+
   logger.info "creating tasks"
 
-  let idleTask = createKernelTask(cpu.idle, "idle", low(TaskPriority))
-
+  var idleTask = createKernelTask(cpu.idle, "idle", TaskPriority.low)
   let gfxTask = createKernelTask(gfxsrv.start, "gfxsrv")
 
+  # create user tasks [for testing]
   var utask1 = createUserTask(
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
     imagePageCount = bootInfo.userImagePages,
@@ -105,18 +110,11 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
     name = "utask2",
   )
 
-  logger.info "adding tasks to scheduler"
-  sched.addTask(idleTask)
-  sched.addTask(gfxTask)
-  sched.addTask(utask1)
-  sched.addTask(utask2)
+  logger.info "init scheduler"
+  schedInit([gfxTask, utask1, utask2])
 
-  logger.info "creating a channel"
-  let ch = newChannel()
-  send(ch.id, 1010)
-
-  logger.info "starting scheduler"
-  sched.schedule()
+  logger.info "switching to the idle task"
+  switchTo(idleTask)
 
 ####################################################################################################
 # Report unhandled Nim exceptions

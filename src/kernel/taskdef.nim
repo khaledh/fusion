@@ -5,6 +5,9 @@
 import common/pagetables
 import vmm
 
+const
+  InitialQuantumMs = 20  # 20ms
+
 type
   TaskStack* = object
     data*: ptr UncheckedArray[uint64]
@@ -17,6 +20,7 @@ type
     name*: string
     priority*: TaskPriority
     state*: TaskState
+    remainingQuantumMs*: uint64 = InitialQuantumMs
     sleepUntil*: uint64  # based on apic timer count
     # user task fields
     vmRegions*: seq[VMRegion]

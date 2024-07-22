@@ -2,12 +2,12 @@
   Task scheduler
 ]#
 
-import std/heapqueue
+import std/[heapqueue, sequtils]
 
 import ctxswitch
+import lapic
+import stopwatch as sw
 import taskdef
-
-{.experimental: "codeReordering".}
 
 let logger = DebugLogger(name: "sched")
 
@@ -17,6 +17,7 @@ proc cmpPriority(a, b: Task): bool {.inline.} =
 var
   readyTasks = initHeapQueue[Task](cmp = cmpPriority)
   currentTask {.exportc.}: Task
+  stopwatch: Stopwatch[StopwatchState.Running]
 
 proc `==`(a, b: Task): bool = a.id == b.id
 
@@ -40,11 +41,22 @@ proc schedule*() =
     # logger.info &"no ready tasks, scheduling same task"
     return
 
+  let elapsedTicks = stopwatch.split()
+  let elapsedMs = ticksToDuration(elapsedTicks)
+
   if not currentTask.isNil and currentTask.state == Running:
+    if currentTask.id != 0:  # skip the idle task
+      # adjust the remaining quantum
+      dec currentTask.remainingQuantumMs, elapsedMs
+      if currentTask.remainingQuantumMs > 0:
+        # the task still has some time left
+        return
+
     if currentTask.priority > readyTasks[0].priority:
       # the current task has higher priority than the next task
       # logger.info &"no higher priority task, scheduling same task"
       return
+
     # put the current task back into the queue
     currentTask.state = TaskState.Ready
     readyTasks.push(currentTask)
@@ -53,10 +65,8 @@ proc schedule*() =
   var nextTask = readyTasks.pop()
 
   logger.info &"switching -> {nextTask.id}"
-
-  # if currentTask.isNil or currentTask.state == Terminated:
-  #   logger.info &"switching -> {nextTask.id}"
-  # else:
-  #   logger.info &"switching {currentTask.id} -> {nextTask.id}"
-
   switchTo(nextTask)
+
+proc schedInit*(tasks: openArray[Task]) =
+  tasks.apply(addTask)
+  stopwatch = newStopwatch().start()
