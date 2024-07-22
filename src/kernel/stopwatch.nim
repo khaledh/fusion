@@ -3,68 +3,66 @@
 
   Implementation notes:
     - Uses getCurrentTicks from lapic module to get the current TSC ticks
-    - Uses a typestate pattern to ensure the correct usage of the stopwatch
     - The stopwatch can be in one of three states: Idle, Running, Stopped
-    - State machine:
-        <init>: Idle
-
-        Idle    --start-->   Running
-
-        Running --split-->   Running
-        Running --stop-->    Stopped
-
-        Stopped --reset-->   Idle
+    - The `split` method returns the elapsed time since the last split
+    - The {.cast(uncheckedAssign).} pragma is needed to assign to the state field
 ]#
 
 import lapic
 
 type
-  StopwatchState* = enum
+  StopwatchState = enum
     Idle, Running, Stopped
 
-  Stopwatch*[State: static StopwatchState] = object
+  Stopwatch* = object
     case state: StopwatchState
     of Idle: discard
     of Running, Stopped:
       startTicks: uint64
       lastTicks: uint64
 
-proc newStopwatch*(): Stopwatch[Idle] =
-  Stopwatch[Idle](state: Idle)
+proc newStopwatch*(): Stopwatch =
+  Stopwatch(state: Idle)
 
-proc start*(s: Stopwatch[Idle]): Stopwatch[Running] =
+proc start*(s: var Stopwatch) =
   ## Starts the stopwatch
-  let currentTicks = getCurrentTicks()
-  Stopwatch[Running](
-    state: Running,
-    startTicks: currentTicks,
-    lastTicks: currentTicks,
-  )
+  case s.state
+  of Idle:
+    let currentTicks = getCurrentTicks()
+    {.cast(uncheckedAssign).}:
+      s.state = Running
+      s.startTicks = currentTicks
+      s.lastTicks = currentTicks
+  else: discard
 
-proc split*(s: var Stopwatch[Running]): uint64 =
+proc split*(s: var Stopwatch): uint64 =
   ## Returns the elapsed time since the last split
-  let currentTicks = getCurrentTicks()
-  let elapsedTicks = currentTicks - s.lastTicks
-  s.lastTicks = currentTicks
-  return elapsedTicks
+  case s.state
+  of Running:
+    let currentTicks = getCurrentTicks()
+    let elapsedTicks = currentTicks - s.lastTicks
+    s.lastTicks = currentTicks
+    elapsedTicks
+  else: 0
 
-proc stop*(s: Stopwatch[Running]): Stopwatch[Stopped] =
+proc stop*(s: var Stopwatch) =
   ## Stops the stopwatch
-  let currentTicks = getCurrentTicks()
-  Stopwatch[Stopped](
-    state: Stopped,
-    startTicks: s.startTicks,
-    lastTicks: currentTicks,
-  )
+  case s.state
+  of Running:
+    let currentTicks = getCurrentTicks()
+    {.cast(uncheckedAssign).}:
+      s.state = Stopped
+      s.lastTicks = currentTicks
+  else: discard
 
-proc reset*(s: Stopwatch[Stopped]): Stopwatch[Idle] =
+proc reset*(s: var Stopwatch) =
   ## Resets the stopwatch and returns it to the idle state
-  newStopwatch()
+  {.cast(uncheckedAssign).}:
+    s.state = Idle
 
-proc elapsed*(s: Stopwatch[Running]): uint64 =
+proc elapsed*(s: Stopwatch): uint64 =
   ## Returns the elapsed time since the stopwatch was started
-  return getCurrentTicks() - s.startTicks
-
-proc elapsed*(s: Stopwatch[Stopped]): uint64 =
-  ## Returns the elapsed ticks between the start and stop ticks
-  return s.lastTicks - s.startTicks
+  case s.state
+  of Running: getCurrentTicks() - s.startTicks
+  of Stopped: s.lastTicks - s.startTicks
+  else: 0

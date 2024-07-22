@@ -17,7 +17,7 @@ proc cmpPriority(a, b: Task): bool {.inline.} =
 var
   readyTasks = initHeapQueue[Task](cmp = cmpPriority)
   currentTask {.exportc.}: Task
-  stopwatch: Stopwatch[StopwatchState.Running]
+  stopwatch: Stopwatch
 
 proc `==`(a, b: Task): bool = a.id == b.id
 
@@ -69,4 +69,5 @@ proc schedule*() =
 
 proc schedInit*(tasks: openArray[Task]) =
   tasks.apply(addTask)
-  stopwatch = newStopwatch().start()
+  stopwatch = newStopwatch()
+  stopwatch.start()
