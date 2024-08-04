@@ -5,8 +5,6 @@
 import drivers/bga
 import taskmgr
 
-{.experimental: "codeReordering".}
-
 let
   logger = DebugLogger(name: "gfxsrv")
 
@@ -21,6 +19,9 @@ var
   buffer0: ptr UncheckedArray[uint32]
   buffer1: ptr UncheckedArray[uint32]
   backBuffer: ptr UncheckedArray[uint32]
+
+
+proc swapBuffers*()
 
 proc start*()  {.cdecl.} =
   logger.info "starting graphics server"

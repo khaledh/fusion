@@ -1,10 +1,8 @@
 #[
   Channel library functions
 ]#
-import std/options
 
 include syscalldef
-import syslib/io
 
 
 proc open*(cid: int, mode: int): int {.stackTrace: off.} =

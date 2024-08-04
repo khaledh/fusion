@@ -8,8 +8,6 @@ import pci
 import ../ports
 import ../vmm
 
-{.experimental: "codeReordering".}
-
 const
   BgaPortIndex               = 0x1ce
   BgaPortValue               = 0x1cf
@@ -55,6 +53,9 @@ var
   fbPhysAddr: uint64
   fbVirtAddr: uint64
   fbNumPages: uint64
+
+
+proc bgaReadRegister*(index: uint16): uint16
 
 proc pciInit*(dev: PciDeviceConfig) =
   logger.info &"initializing Bochs Graphics Adapter"

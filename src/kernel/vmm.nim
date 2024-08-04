@@ -7,8 +7,6 @@ import std/algorithm
 import common/pagetables
 import pmm
 
-{.experimental: "codeReordering".}
-
 type
   PhysAlloc* = proc (nframes: uint64): PhysAddr
 

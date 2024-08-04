@@ -7,10 +7,12 @@ import gdt
 import taskdef
 import vmm
 
-{.experimental: "codeReordering".}
-
 var
   currentTask {.importc.}: Task
+
+
+proc resume(task: Task) {.asmNoStackFrame.}
+proc switch(old: Task, new: Task) {.asmNoStackFrame.}
 
 proc switchTo*(next: var Task) =
   # set the TSS rsp0 to the new task's kernel stack

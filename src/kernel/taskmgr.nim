@@ -14,8 +14,6 @@ import taskdef
 import vmm
 
 
-{.experimental: "codeReordering".}
-
 let
   logger = DebugLogger(name: "taskmgr")
 
@@ -26,6 +24,9 @@ var
   tasks = newSeq[Task]()
   sleepers = initHeapQueue[Task](cmp = cmpSleepUntil)
   nextTaskId: uint64 = 0
+
+
+proc wakeupTasks*()
 
 proc taskmgrInit*() =
   timer.registerCallback(wakeupTasks)
@@ -140,6 +141,8 @@ proc createUserTask*(
 
 type
   KernelProc* = proc () {.cdecl.}
+
+proc terminate*()
 
 proc kernelTaskWrapper*(kproc: KernelProc) =
   logger.info &"running kernel task \"{getCurrentTask().name}\""
