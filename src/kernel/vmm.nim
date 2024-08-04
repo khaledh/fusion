@@ -36,14 +36,20 @@ const
   UserSpaceMinAddress* = 0x0000000000001000'u64.VirtAddr
   UserSpaceMaxAddress* = 0x00007fffffffffff'u64.VirtAddr
 
+let
+  logger = DebugLogger(name: "vmm")
+
 var
   physicalMemoryVirtualBase: uint64
   pmalloc: PhysAlloc
   kspace*: VMAddressSpace
   uspace*: VMAddressSpace
+  kpml4*: ptr PML4Table
 
 template `end`*(region: VMRegion): VirtAddr =
   region.start +! region.npages * PageSize
+
+proc getActivePML4*(): ptr PML4Table
 
 proc vmInit*(physMemoryVirtualBase: uint64, physAlloc: PhysAlloc) =
   physicalMemoryVirtualBase = physMemoryVirtualBase
@@ -58,6 +64,7 @@ proc vmInit*(physMemoryVirtualBase: uint64, physAlloc: PhysAlloc) =
     maxAddress: UserSpaceMaxAddress,
     regions: @[],
   )
+  kpml4 = getActivePML4()
 
 proc vmAddRegion*(space: var VMAddressSpace, start: VirtAddr, npages: uint64) =
   space.regions.add VMRegion(start: start, npages: npages)
@@ -75,7 +82,7 @@ proc getActivePML4*(): ptr PML4Table =
   """
   result = cast[ptr PML4Table](p2v(cr3.PhysAddr))
 
-proc v2p(virt: VirtAddr): Option[PhysAddr]
+proc v2p*(virt: VirtAddr): Option[PhysAddr]
 proc setActivePML4*(pml4: ptr PML4Table) =
   var cr3 = v2p(cast[VirtAddr](pml4)).get
   asm """
@@ -126,7 +133,7 @@ proc v2p*(virt: VirtAddr, pml4: ptr PML4Table): Option[PhysAddr] =
 
   result = some PhysAddr(pt[ptIndex].physAddress shl 12)
 
-proc v2p(virt: VirtAddr): Option[PhysAddr] =
+proc v2p*(virt: VirtAddr): Option[PhysAddr] =
   v2p(virt, getActivePML4())
 
 ####################################################################################################
@@ -225,6 +232,17 @@ proc mapRegion*(
 ) =
   for i in 0 ..< pageCount:
     mapPage(pml4, virtAddr +! i * PageSize, physAddr +! i * PageSize, pageAccess, pageMode, noExec)
+
+proc mapRegion*(
+  pml4: ptr PML4Table,
+  virtAddr: VirtAddr,
+  pageCount: uint64,
+  pageAccess: PageAccess,
+  pageMode: PageMode,
+  noExec: bool = false,
+) =
+  let physAddr = pmalloc(pageCount)
+  mapRegion(pml4, virtAddr, physAddr, pageCount, pageAccess, pageMode, noExec)
 
 proc identityMapRegion*(
   pml4: ptr PML4Table,

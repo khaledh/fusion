@@ -31,11 +31,11 @@ The following features are currently implemented:
 - System Calls
 - ELF Loader
 - Timer Interrupts
+- Channel-based Inter-Process Communication
 
 Planned:
 
 - Demand Paging
-- Inter-Process Communication
 - Disk I/O
 - File System
 - Keyboard/Mouse Input

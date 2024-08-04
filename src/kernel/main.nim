@@ -89,10 +89,6 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.info "init task manager"
   taskmgrInit()
 
-  logger.info "creating a channel [for testing]"
-  let ch = newChannel()
-  send(ch.id, 1010)
-
   logger.info "creating tasks"
 
   var idleTask = createKernelTask(cpu.idle, "idle", TaskPriority.low)
@@ -109,6 +105,14 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
     imagePageCount = bootInfo.userImagePages,
     name = "utask2",
   )
+
+  logger.info "creating a channel [for testing]"
+  let ch = newChannel(msgSize = sizeof(int))
+  var data = new(int)
+  data[] = 1010
+  let msg = Message(len: sizeof(int), data: cast[ptr UncheckedArray[byte]](data))
+  discard send(ch.id, msg)
+
 
   logger.info "init scheduler"
   schedInit([gfxTask, utask1, utask2])

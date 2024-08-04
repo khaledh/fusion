@@ -14,5 +14,7 @@ const
   SysPrint* = 201
 
   # Channels
-  SysChannelSend* = 301
-  SysChannelRecv* = 302
+  SysChannelOpen* = 301
+  SysChannelClose* = 302
+  SysChannelSend* = 303
+  SysChannelRecv* = 304

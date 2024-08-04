@@ -67,7 +67,6 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
 
   # map each region into the page tables, making sure to set the R/W and NX flags as needed
   # debugln "loader: Mapping user image"
-  var kpml4 = getActivePML4()
   for region in vmRegions:
     let access = if region.flags.contains(Write): paReadWrite else: paRead
     let noExec = not region.flags.contains(Execute)

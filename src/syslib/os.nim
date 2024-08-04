@@ -41,7 +41,7 @@ proc sleep*(durationMs: uint64) =
     : "rdi", "rsi"
   """
 
-proc exit*(code: int) =
+proc exit*(code: int = 0) =
   asm """
     mov rdi, %0
     mov rsi, %1

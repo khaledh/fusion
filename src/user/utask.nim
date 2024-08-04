@@ -19,23 +19,39 @@ proc UserMain*(param: int) {.exportc.} =
 
   let tid = os.getTaskId()
 
-  var data = recv(chid = 0)
-  var datastr = $data
-  print(datastr.addr)
+  let ret = open(cid = 0, mode = 1)
 
-  if data == 1010:
+  if ret < 0:
+    exit(1)
+  
+  var dataIn = recv[ptr uint64](cid = 0)
+  if dataIn.isNil:
+    close(cid = 0)
+    exit(1)
+  
+  var dataInStr = $dataIn[]
+  print(addr dataInStr)
+
+  if dataIn[] == 1010:
     sleep(100)
 
-    send(chid = 0, data = 2020)
+    var dataOut = 2020
+    send(cid = 0, data = addr dataOut)
 
     sleep(100)
 
-    data = recv(chid = 0)
-    datastr = $data
-    print(datastr.addr)
+    dataIn = recv[ptr uint64](cid = 0)
+    if dataIn.isNil:
+      close(cid = 0)
+      exit(1)
+    dataInStr = $dataIn[]
+    print(addr dataInStr)
 
-  if data == 2020:
+  if dataIn[] == 2020:
+    var dataOut = new(int)
+    dataOut[] = 3030
     sleep(100)
-    send(chid = 0, data = 3030)
+    send(cid = 0, data = cast[ptr int](dataOut))
 
+  close(cid = 0)
   exit(0)

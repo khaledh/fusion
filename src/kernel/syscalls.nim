@@ -17,8 +17,8 @@ type
     num: uint64
     arg1, arg2, arg3, arg4, arg5: uint64
   SyscallError* = enum
-    InvalidArg     = -2
-    InvalidSyscall = -1
+    InvalidSyscall = -99
+    InvalidArg     = -1
     None           = 0
 
 const
@@ -31,8 +31,19 @@ var
   syscallTable: array[1024, SyscallHandler]
   currentTask {.importc.}: Task
 
+
+###############################################################################
+# Syscall entry point
+###############################################################################
+
 proc syscallEntry() {.asmNoStackFrame.} =
   asm """
+  #   cmp rdi, 303
+  #   jne .skip
+  #   cli
+  #   hlt
+  # .skip:
+
     # save user stack pointer
     mov %0, rsp
 
@@ -43,9 +54,9 @@ proc syscallEntry() {.asmNoStackFrame.} =
     push rcx  # user rip
 
     # create SyscallArgs on the stack
+    push r10
     push r9
     push r8
-    push rcx
     push rdx
     push rsi
     push rdi
@@ -58,9 +69,9 @@ proc syscallEntry() {.asmNoStackFrame.} =
     pop rdi
     pop rsi
     pop rdx
-    pop rcx
     pop r8
     pop r9
+    pop r10
 
     # prepare for sysretq
     pop rcx  # user rip
@@ -72,7 +83,7 @@ proc syscallEntry() {.asmNoStackFrame.} =
     sysretq
     : "+r"(`currentTask`->rsp)
     : "m"(`currentTask`->kstack.bottom)
-    : "rcx", "r11", "rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax"
+    : "rcx", "r11", "rdi", "rsi", "rdx", "r8", "r9", "r10", "rax", "r15"
   """
 
 proc syscall(args: ptr SyscallArgs): int {.exportc.} =
@@ -80,6 +91,7 @@ proc syscall(args: ptr SyscallArgs): int {.exportc.} =
   if args.num > syscallTable.high.uint64 or syscallTable[args.num] == nil:
     return InvalidSyscall.int
   result = syscallTable[args.num](args)
+
 
 ###############################################################################
 # Syscalls
@@ -89,6 +101,18 @@ proc syscall(args: ptr SyscallArgs): int {.exportc.} =
 # Get Task ID
 ###
 proc getTaskId*(args: ptr SyscallArgs): int =
+  ##
+  ## Get the current task ID.
+  ##
+  ## Arguments:
+  ##   None
+  ##
+  ## Returns:
+  ##   The task ID.
+  ##
+  ## Side effects:
+  ##   None
+  ##
   logger.info &"[tid:{getCurrentTask().id}] getTaskId"
   result = getCurrentTask().id.int
 
@@ -96,6 +120,18 @@ proc getTaskId*(args: ptr SyscallArgs): int =
 # Yield
 ###
 proc `yield`*(args: ptr SyscallArgs): int =
+  ##
+  ## Yield the CPU to another task.
+  ##
+  ## Arguments:
+  ##   None
+  ##
+  ## Returns:
+  ##   None
+  ##
+  ## Side effects:
+  ##   The current task is moved to the ready queue.
+  ##
   logger.info &"[tid:{getCurrentTask().id}] yield"
   schedule()
 
@@ -103,6 +139,18 @@ proc `yield`*(args: ptr SyscallArgs): int =
 # Suspend
 ###
 proc suspend*(args: ptr SyscallArgs): int =
+  ##
+  ## Suspend the current task.
+  ##
+  ## Arguments:
+  ##   None
+  ##
+  ## Returns:
+  ##   None
+  ##
+  ## Side effects:
+  ##   The current task is suspended. It can only be resumed by another task.
+  ##
   logger.info &"[tid:{getCurrentTask().id}] suspend"
   suspend()
 
@@ -110,6 +158,18 @@ proc suspend*(args: ptr SyscallArgs): int =
 # Sleep
 ###
 proc sleep*(args: ptr SyscallArgs): int =
+  ##
+  ## Sleep for a given number of milliseconds.
+  ##
+  ## Arguments:
+  ##  arg1 (in): number of milliseconds to sleep
+  ##
+  ## Returns:
+  ##   None
+  ##
+  ## Side effects:
+  ##  The current task will be suspended for the given number of milliseconds.
+  ##
   logger.info &"[tid:{getCurrentTask().id}] sleep: ms={args.arg1}"
   sleep(args.arg1)
 
@@ -117,31 +177,145 @@ proc sleep*(args: ptr SyscallArgs): int =
 # Exit
 ###
 proc exit*(args: ptr SyscallArgs): int =
+  ##
+  ## Exit the current task.
+  ##
+  ## Arguments:
+  ##   arg1 (in): exit code
+  ##
+  ## Returns:
+  ##   None
+  ##
+  ## Side effects:
+  ##   The current task will be terminated.
+  ##
   logger.info &"[tid:{getCurrentTask().id}] exit: code={args.arg1}"
   terminate()
 
 
 ###
+# ChannelOpen
+###
+proc channelOpen*(args: ptr SyscallArgs): int =
+  ##
+  ## Open a channel for a task in a specific mode. Map the buffer to the task's address space.
+  ##
+  ## Arguments:
+  ##   arg1 (in): channel id
+  ##   arg2 (in): mode (0 = read, 1 = write)
+  ##
+  ## Returns:
+  ##   None
+  ##
+  ## Side effects:
+  ##   The channel buffer will be mapped to the task's address space.
+  ##
+  let chid = args.arg1.int
+  let mode = args.arg2.int
+  if mode < ChannelOpenMode.low.int or mode > ChannelOpenMode.high.int:
+    return InvalidArg.int
+  
+  let chMode = ChannelOpenMode(mode)
+
+  let currentTask = getCurrentTask()
+  logger.info &"[tid:{getCurrentTask().id}] channelOpen: chid={chid}, mode={mode}"
+  let ret = open(chid, getCurrentTask(), chMode)
+  if ret < 0:
+    return InvalidArg.int
+
+###
+# ChannelClose
+###
+proc channelClose*(args: ptr SyscallArgs): int =
+  ##
+  ## Close a channel for a task. Unmap the buffer from the task's address space.
+  ##
+  ## Arguments:
+  ##   arg1 (in): channel id
+  ##
+  ## Returns:
+  ##   None
+  ##
+  ## Side effects:
+  ##   The channel buffer will be unmapped from the task's address space.
+  ##
+  let chid = args.arg1.int
+  logger.info &"[tid:{getCurrentTask().id}] channelClose: chid={chid}"
+  let ret = close(chid, getCurrentTask())
+  if ret < 0:
+    return InvalidArg.int
+
+###
 # ChannelSend
 ###
 proc channelSend*(args: ptr SyscallArgs): int =
-  let chid = args.arg1
-  let data = args.arg2
-  logger.info &"[tid:{getCurrentTask().id}] channelSend: chid={chid}, data={data}"
-  send(chid.int, data.int)
+  ##
+  ## Send data to a channel
+  ## 
+  ## Arguments:
+  ##   arg1 (in): channel id
+  ##   arg2 (in): data length
+  ##   arg3 (in): data pointer
+  ##
+  ## Returns:
+  ##  0 on success
+  ## -1 on error
+  ##
+  ## Side effects:
+  ##   If the channel is full, the task will be blocked until there is space in the channel.
+  ##
+  let chid = args.arg1.int
+  let len = args.arg2.int
+  let data = cast[ptr UncheckedArray[byte]](args.arg3)
+
+  logger.info &"[tid:{getCurrentTask().id}] channelSend: chid={chid}, len={len}, data={cast[uint64](data):#x}"
+  let ret = send(chid, Message(len: len, data: data))
+  if ret < 0:
+    return InvalidArg.int
 
 ###
 # ChannelRecv
 ###
-proc channelRecv*(args: ptr SyscallArgs): int {.stackTrace:off.} =
+proc channelRecv*(args: ptr SyscallArgs): int =
+  ##
+  ## Receive data from a channel
+  ##
+  ## Arguments:
+  ##   arg1 (in): channel id
+  ##   arg2 (out): data length
+  ##   arg3 (out): data pointer
+  ##
+  ## Returns:
+  ##   0 on success
+  ##  -1 on error
+  ##
+  ## Side effects:
+  ##   If the channel is empty, the task will be blocked until there is data in the channel.
+  ##
   let chid = args.arg1
   logger.info &"[tid:{getCurrentTask().id}] channelRecv: chid={chid}"
-  result = recv(chid.int)
-  
+  let msg = recv(chid.int)
+  if msg.len < 0:
+    return InvalidArg.int
+  args.arg2 = msg.len.uint64
+  args.arg3 = cast[uint64](msg.data)
+
 ###
 # Print
 ###
 proc print*(args: ptr SyscallArgs): int =
+  ##
+  ## Print a string to the console.
+  ##
+  ## Arguments:
+  ##   arg1 (in): pointer to a Nim string object.
+  ##
+  ## Returns:
+  ##   None
+  ##
+  ## Side effects:
+  ##   The string will be printed to the console.
+  ##
   logger.info &"[tid:{getCurrentTask().id}] print"
   # logger.info &"print: arg1.len = {cast[ptr uint64](args.arg1)[]}"
   # logger.info &"print: arg1.p   = {cast[ptr uint64](args.arg1 + 8)[]:#x}"
@@ -153,6 +327,11 @@ proc print*(args: ptr SyscallArgs): int =
   logger.raw s[]
   logger.raw "\n"
 
+
+###############################################################################
+# Initialization
+###############################################################################
+
 proc syscallInit*() =
   # set up syscall table
   syscallTable[SysGetTaskId] = getTaskId
@@ -161,6 +340,8 @@ proc syscallInit*() =
   syscallTable[SysSleep] = sleep
   syscallTable[SysExit] = exit
 
+  syscallTable[SysChannelOpen] = channelOpen
+  syscallTable[SysChannelClose] = channelClose
   syscallTable[SysChannelSend] = channelSend
   syscallTable[SysChannelRecv] = channelRecv
 

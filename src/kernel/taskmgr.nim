@@ -88,7 +88,6 @@ proc createUserTask*(
 
   # map kernel space
   # logger.info &"mapping kernel space in task's page table"
-  var kpml4 = getActivePML4()
   for i in 256 ..< 512:
     pml4.entries[i] = kpml4.entries[i]
 

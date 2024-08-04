@@ -22,6 +22,18 @@ proc newBlockingQueue*[T](capacity: int): BlockingQueue[T] =
     notFull: newCondVar(),
   )
 
+proc len*[T](q: BlockingQueue[T]): int =
+  withLock(q.lock):
+    result = q.items.len
+
+proc isEmpty*[T](q: BlockingQueue[T]): bool =
+  withLock(q.lock):
+    result = q.items.len == 0
+
+proc isFull*[T](q: BlockingQueue[T]): bool =
+  withLock(q.lock):
+    result = q.items.len == q.cap
+
 proc enqueue*[T](q: BlockingQueue[T], item: T) =
   withLock(q.lock):
     while q.items.len == q.cap:
