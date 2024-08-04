@@ -14,9 +14,9 @@ the process of building it at: [https://0xc0ffee.netlify.app](https://0xc0ffee.n
 
 ![Screenshot from the graphics branch](screenshots/graphics.png)
 
-**Booting Fusion Kernel**
+**Booting and Running the Kernel**
 
-![Booting Fusion Kernel](screenshots/kernel-booting.png)
+![Booting and Running Fusion Kernel](screenshots/kernel-booting.png)
 
 ## Features
 
