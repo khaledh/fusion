@@ -23,18 +23,34 @@ the process of building it at: [https://0xc0ffee.netlify.app](https://0xc0ffee.n
 The following features are currently implemented:
 
 - UEFI Bootloader
-- Physical Memory Manager
-- Virtual Memory Manager
-- Single Address Space
-- User Mode
-- Preemptive Multitasking
+- Memory Management
+  - Single Address Space
+  - Physical Memory Manager
+  - Virtual Memory Manager
+  - Higher Half Kernel
+- Task Management
+  - Kernel Tasks
+  - User Mode Tasks
+  - Preemptive Multitasking
+  - Priority-based Scheduling
+  - ELF Loader
 - System Calls
-- ELF Loader
-- Timer Interrupts
-- Channel-based Inter-Process Communication
+  - System Call Interface
+  - SYSCALL/SYSRET
+  - User Mode Library
+- IPC
+  - Synchronization Primitives
+  - Channel-based IPC
+  - Message Passing
+- Hardware
+  - Timer Interrupts
+  - PCI Device Enumeration
+  - Bochs Graphics Adapter Driver
 
-Planned:
+#### Planned
 
+- Capability-based Security
+- Event-based Task State Machines
 - Demand Paging
 - Disk I/O
 - File System
