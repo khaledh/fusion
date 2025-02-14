@@ -1,3 +1,5 @@
+set dotenv-load
+
 nimflags := (
   "--os:any" +
   if os() == "macos" { " -d:macosx" } else { "" }

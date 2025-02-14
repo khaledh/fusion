@@ -67,6 +67,8 @@ To build Fusion, you need to have the following dependencies installed:
 - [LLVM](https://llvm.org) (clang and lld)
 - [Just](https://github.com/casey/just)
 
+The `clang` and `lld` binaries should be in your `PATH`. You can edit the `.env` file to specify the path to the `clang` and `lld` binaries if they are not in your `PATH`.
+
 Build Fusion with the following command:
 
 ```sh
