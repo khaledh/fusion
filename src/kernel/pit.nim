@@ -8,7 +8,7 @@
 import ports
 
 type
-  SetCounterCommand {.packed, size: 1.} = object
+  SetCounterCommand {.packed.} = object
     encoding {.bitsize: 1.}: Encoding
     operatingMode {.bitsize: 3.}: OperatingMode
     accessMode {.bitsize: 2.}: AccessMode
@@ -36,7 +36,7 @@ type
     Counter1 = 1
     Counter2 = 2
 
-  ReadBackCommand {.packed, size: 1.} = object
+  ReadBackCommand {.packed.} = object
     reserved {.bitsize: 1.} = 0
     counter0 {.bitsize: 1.}: uint8
     counter1 {.bitsize: 1.}: uint8
@@ -45,7 +45,7 @@ type
     latchCount {.bitsize: 1.}: uint8 = 1  # inverted logic
     alwaysOnes {.bitsize: 2.} = 0b11
 
-  StatusByte* {.packed, size: 1.} = object
+  StatusByte* {.packed.} = object
     encoding* {.bitsize: 1.}: Encoding
     operatingMode* {.bitsize: 3.}: OperatingMode
     accessMode* {.bitsize: 2.}: AccessMode

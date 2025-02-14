@@ -5,8 +5,6 @@
 import common/[libc, malloc]
 import syslib/[channels, io, os]
 
-let NewLine = "\n"
-
 proc NimMain() {.importc.}
 
 proc UserMain*(param: int) {.exportc.} =

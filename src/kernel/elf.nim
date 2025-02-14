@@ -85,11 +85,12 @@ type
     Phdr = (6, "PHDR")
     Tls = (7, "TLS")
   
-  ElfProgramHeaderFlag = enum
+  ElfProgramHeaderFlag {.size: sizeof(uint32).} = enum
     Executable = (0, "E")
     Writable   = (1, "W")
     Readable   = (2, "R")
-  ElfProgramHeaderFlags {.size: sizeof(uint32).} = set[ElfProgramHeaderFlag]
+    _          = 31  # make the flags set 32 bits wide instead of 1 byte
+  ElfProgramHeaderFlags = set[ElfProgramHeaderFlag]
 
   ElfSectionHeader {.packed.} = object
     nameoffset: uint32

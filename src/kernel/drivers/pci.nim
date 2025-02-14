@@ -39,7 +39,7 @@ const
     (0x02'u8, 0x03'u8, 0x00'u8): "ATM controller",
     (0x02'u8, 0x04'u8, 0x00'u8): "ISDN controller",
     (0x02'u8, 0x05'u8, 0x00'u8): "WorldFip controller",
-    (0x02'u8, 0x06'u8, 0x00'u8): "PICMG 2.14 Mutli Computing",
+    (0x02'u8, 0x06'u8, 0x00'u8): "PICMG 2.14 multi-computing",
     (0x02'u8, 0x07'u8, 0x00'u8): "InfiniBand controller",
     (0x02'u8, 0x08'u8, 0x00'u8): "Host fabric controller",
     (0x02'u8, 0x80'u8, 0x00'u8): "Other network controller",

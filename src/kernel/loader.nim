@@ -122,7 +122,7 @@ type
     tag: uint64
     value: uint64
 
-  DynmaicEntryType = enum
+  DynamicEntryType = enum
     Rela = 7
     RelaSize = 8
     RelaEntSize = 9
@@ -150,16 +150,16 @@ proc applyRelocations(image: ptr UncheckedArray[byte], dynOffset: uint64) =
   # debugln &"dyn[i].tag = {dyn[i].tag:#x}"
   while dyn[i].tag != 0:
     case dyn[i].tag
-    of DynmaicEntryType.Rela.uint64:
+    of DynamicEntryType.Rela.uint64:
       reloffset = dyn[i].value
       # debugln &"reloffset = {reloffset:#x}"
-    of DynmaicEntryType.RelaSize.uint64:
+    of DynamicEntryType.RelaSize.uint64:
       relsize = dyn[i].value
       # debugln &"relsize = {relsize:#x}"
-    of DynmaicEntryType.RelaEntSize.uint64:
+    of DynamicEntryType.RelaEntSize.uint64:
       relentsize = dyn[i].value
       # debugln &"relentsize = {relentsize:#x}"
-    of DynmaicEntryType.RelaCount.uint64:
+    of DynamicEntryType.RelaCount.uint64:
       relcount = dyn[i].value
       # debugln &"relcount = {relcount:#x}"
     else:

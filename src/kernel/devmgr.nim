@@ -19,6 +19,8 @@ let
 
 proc devmgrInit*() =
   for dev in enumeratePciBus(0):
-    let devInit = PciDeviceInitializers.getOrDefault((dev.vendorId, dev.deviceId), nil)
-    if not devInit.isNil:
-      devInit(dev)
+    let key = (dev.vendorId, dev.deviceId)
+    if PciDeviceInitializers.hasKey(key):
+      let devInit = PciDeviceInitializers[key]
+      if not devInit.isNil:
+        devInit(dev)

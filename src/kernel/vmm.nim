@@ -15,11 +15,12 @@ type
     npages*: uint64
     flags*: VMRegionFlags
 
-  VMRegionFlag* = enum
+  VMRegionFlag* {.size: sizeof(uint32).} = enum
     Execute = (0, "E")
     Write   = (1, "W")
     Read    = (2, "R")
-  VMRegionFlags* {.size: sizeof(uint32).} = set[VMRegionFlag]
+    _       = 31  # make the flags set 32 bits wide instead of 1 byte
+  VMRegionFlags* = set[VMRegionFlag]
 
   VMAddressSpace* = object
     minAddress*: VirtAddr

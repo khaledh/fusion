@@ -358,7 +358,7 @@ proc syscallInit*() =
   #   CS: IA32_STAR[63:48] + 16
   #   SS: IA32_STAR[63:48] + 8
   # thus, setting both parts of the register to KernelCodeSegmentSelector
-  # satisfies both requirements (+0 is kernrel CS, +8 is data segment, +16 is user CS)
+  # satisfies both requirements (+0 is kernel CS, +8 is data segment, +16 is user CS)
   let star = (
     (KernelCodeSegmentSelector.uint64 shl 32) or
     (KernelCodeSegmentSelector.uint64 shl 48)

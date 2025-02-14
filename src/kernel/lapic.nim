@@ -55,9 +55,11 @@ type
     Idle        = 0 shl 12
     SendPending = 1 shl 12
   
-  SpuriousInterruptVectorRegister {.packed, size: sizeof(uint32).} = object
+  SpuriousInterruptVectorRegister {.packed.} = object
     vector: uint8
     apicEnabled {.bitsize: 1.}: uint8
+    reserved0 {.bitsize: 7.}: uint8
+    reserved1 : uint16
 
 let
   logger = DebugLogger(name: "lapic")

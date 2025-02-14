@@ -48,7 +48,7 @@ type
     id*: int
     queue: BlockingQueue[Message]
     buffer: ChannelBuffer
-    nextSolt: int = 0
+    nextSlot: int = 0
     writeLock: Lock
 
   ChannelOpenMode* = enum
@@ -73,7 +73,7 @@ proc newChannelId(): int =
     inc nextChannelId
 
 proc advanceSlot(ch: Channel) =
-  ch.nextSolt = (ch.nextSolt + 1) mod ch.queue.cap
+  ch.nextSlot = (ch.nextSlot + 1) mod ch.queue.cap
 
 proc newChannel*(msgSize: int, msgCapacity: int = DefaultMessageCapacity): Channel =
   let buffSize = msgSize * msgCapacity
@@ -151,7 +151,7 @@ proc send*(chid: int, msg: Message): int {.stackTrace:off.} =
   var ch = channels[chid]
   withLock(ch.writeLock):
     # copy message data to the buffer
-    let offset = ch.nextSolt * msg.len
+    let offset = ch.nextSlot * msg.len
     let data = ch.buffer.data +! offset
     copyMem(data, msg.data, msg.len)
     ch.advanceSlot()
