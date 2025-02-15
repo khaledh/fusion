@@ -1,21 +1,16 @@
 {
-  "nim.project": [
-    "src/kernel/main.nim",
-    "src/boot/bootx64.nim",
-    "src/user/utask.nim",
-  ],
   "nim.projectMapping": [
     {
-        "projectFile": "src/kernel/main.nim",
-        "fileRegex": "src/(kernel|common)/.*\\.nim",
+        "projectFile": "src/boot/bootx64.nim",
+        "fileRegex": "src/boot/.*\\.nim"
     },
     {
-        "projectFile": "src/boot/bootx64.nim",
-        "fileRegex": "src/boot/.*\\.nim",
+        "projectFile": "src/kernel/main.nim",
+        "fileRegex": "src/(kernel|common)/.*\\.nim"
     },
     {
         "projectFile": "src/user/utask.nim",
-        "fileRegex": "src/(user|syslib)/.*\\.nim",
-    },
-  ],
+        "fileRegex": "src/(user|syslib)/.*\\.nim"
+    }
+  ]
 }

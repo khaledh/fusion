@@ -3,22 +3,9 @@
 ]#
 
 import common/[bootinfo, libc, malloc, pagetables]
-import channels
-import cpu
-import ctxswitch
-import devmgr
-import drivers/pci
-import idt
-import lapic
-import gfxsrv
-import gdt
-import pmm
-import sched
-import syscalls
-import taskdef
-import taskmgr
-import timer
-import vmm
+import
+  channels, cpu, ctxswitch, devmgr, drivers/pci, idt, lapic, gfxsrv,
+  gdt, pmm, sched, syscalls, taskdef, taskmgr, timer, vmm
 
 const KernelVersion = "0.1.0"
 

@@ -4,8 +4,13 @@
 
 include syscalldef
 
+type
+  ChannelMode* = enum
+    Read
+    Write
 
-proc open*(cid: int, mode: int): int {.stackTrace: off.} =
+
+proc open*(cid: int, mode: ChannelMode): int {.stackTrace: off.} =
   ## Open a channel
   ## 
   ## Arguments:
@@ -16,14 +21,15 @@ proc open*(cid: int, mode: int): int {.stackTrace: off.} =
   ##   0 on success
   ##  -1 on error
   ##
-
+  let modeVal = mode.int
   asm """
     mov rdi, %1
     mov rsi, %2
     mov rdx, %3
     syscall
     : "=a" (`result`)
-    : "r" (`SysChannelOpen`), "r" (`cid`), "r" (`mode`)
+    : "r" (`SysChannelOpen`), "r" (`cid`), "r" (`modeVal`)
+    : "rdi", "rsi", "rdx"
   """
 
 proc close*(cid: int): int {.discardable.} =
@@ -43,6 +49,7 @@ proc close*(cid: int): int {.discardable.} =
     syscall
     : "=a" (`result`)
     : "r" (`SysChannelClose`), "r" (`cid`)
+    : "rdi", "rsi"
   """
 
 proc send*[T: ptr](cid: int, data: T): int {.discardable.} =
@@ -69,6 +76,7 @@ proc send*[T: ptr](cid: int, data: T): int {.discardable.} =
     syscall
     : "=a" (`result`)
     : "r" (`SysChannelSend`), "r" (`cid`), "r" (`len`), "m" (`data`)
+    : "rdi", "rsi", "rdx", "r8"
   """
 
 proc recv*[T: ptr](cid: int): T =
@@ -98,6 +106,7 @@ proc recv*[T: ptr](cid: int): T =
     : "=a" (`ret`),
       "=r" (`len`), "=r" (`pdata`)
     : "r" (`SysChannelRecv`), "r" (`cid`)
+    : "rdi", "rsi", "rdx", "r8"
   """
 
   if ret < 0:

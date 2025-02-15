@@ -15,7 +15,7 @@ import vmm
 ##   - The buffer is divided into equal sized slots. Each slot is used to store a message.
 ##   - The buffer is circular.
 ##   - Buffers are shared between tasks communicating through the same channel.
-##   - Read/write access to the buffer is enforced through read-only virtual memory page mappings.
+##   - Read/write access to the buffer is enforced through virtual memory page mappings.
 ##
 ## User space API:
 ##   - `alloc` to allocate space for a message in the buffer
@@ -41,7 +41,7 @@ type
     data*: ptr UncheckedArray[byte]
 
   ChannelBuffer* = object
-    size*: int
+    cap*: int
     data*: ptr UncheckedArray[byte]
 
   Channel* = ref object
@@ -51,7 +51,7 @@ type
     nextSlot: int = 0
     writeLock: Lock
 
-  ChannelOpenMode* = enum
+  ChannelMode* = enum
     Read
     Write
 
@@ -94,14 +94,14 @@ proc newChannel*(msgSize: int, msgCapacity: int = DefaultMessageCapacity): Chann
     id: newChannelId(),
     queue: newBlockingQueue[Message](msgCapacity),
     buffer: ChannelBuffer(
-      size: buffSize,
+      cap: buffSize,
       data: cast[ptr UncheckedArray[byte]](buffRegion.start)
     ),
     writeLock: newSpinLock(),
   )
   channels[result.id] = result
 
-proc open*(chid: int, task: Task, mode: ChannelOpenMode): int =
+proc open*(chid: int, task: Task, mode: ChannelMode): int =
   ## Open a channel for a task in a specific mode. Map the buffer to the task's address space.
   if not channels.hasKey(chid):
     logger.info &"open: channel id {chid} not found"
@@ -109,8 +109,8 @@ proc open*(chid: int, task: Task, mode: ChannelOpenMode): int =
 
   var ch = channels[chid]
   let buffStart = ch.buffer.data
-  let numPages = (ch.buffer.size + PageSize - 1) div PageSize
-  let pageAccess = if mode == ChannelOpenMode.Read: paRead else: paReadWrite
+  let numPages = (ch.buffer.cap + PageSize - 1) div PageSize
+  let pageAccess = if mode == ChannelMode.Read: paRead else: paReadWrite
 
   let buffStartVirt = cast[VirtAddr](buffStart)
   let buffStartPhys = v2p(buffStartVirt, kpml4).get
@@ -133,7 +133,7 @@ proc close*(chid: int, task: Task): int =
 
   var ch = channels[chid]
   let buffStart = ch.buffer.data
-  let numPages = (ch.buffer.size + PageSize - 1) div PageSize
+  let numPages = (ch.buffer.cap + PageSize - 1) div PageSize
   unmapRegion(
     pml4 = task.pml4,
     virtAddr = cast[VirtAddr](buffStart),

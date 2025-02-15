@@ -9,8 +9,8 @@ let
   logger = DebugLogger(name: "gfxsrv")
 
 const
-  XRes = 1400  # or 1600
-  YRes = 1050  #    1200
+  XRes = 1280 # or 1400, 1600
+  YRes = 960  # or 1050, 1200
 
   DefaultBackground = 0x608aaf'u32
 

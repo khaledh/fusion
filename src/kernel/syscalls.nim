@@ -212,10 +212,10 @@ proc channelOpen*(args: ptr SyscallArgs): int =
   ##
   let chid = args.arg1.int
   let mode = args.arg2.int
-  if mode < ChannelOpenMode.low.int or mode > ChannelOpenMode.high.int:
+  if mode < ChannelMode.low.int or mode > ChannelMode.high.int:
     return InvalidArg.int
   
-  let chMode = ChannelOpenMode(mode)
+  let chMode = ChannelMode(mode)
 
   let currentTask = getCurrentTask()
   logger.info &"[tid:{getCurrentTask().id}] channelOpen: chid={chid}, mode={mode}"

@@ -17,7 +17,7 @@ proc UserMain*(param: int) {.exportc.} =
 
   let tid = os.getTaskId()
 
-  let ret = open(cid = 0, mode = 1)
+  let ret = open(cid = 0, mode = ChannelMode.Write)
 
   if ret < 0:
     exit(1)
