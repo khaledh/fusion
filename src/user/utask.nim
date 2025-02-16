@@ -1,6 +1,7 @@
 #[
   This is an example of a user task.
 ]#
+import std/strutils
 
 import common/[libc, malloc]
 import syslib/[channels, io, os]
@@ -10,46 +11,31 @@ proc NimMain() {.importc.}
 proc UserMain*(param: int) {.exportc.} =
   NimMain()
 
-  # let paramMsg = "param: "
-  # print(paramMsg.addr)
-  # let paramStr = $param
-  # print(paramStr.addr)
-
   let tid = os.getTaskId()
 
-  let ret = open(cid = 0, mode = ChannelMode.Write)
-
-  if ret < 0:
+  if open(cid = 0, mode = ChannelMode.Write) < 0:
     exit(1)
   
-  var dataIn = recv[ptr uint64](cid = 0)
-  if dataIn.isNil:
+  var dataIn: string
+
+  if recv[string](cid = 0, dataIn) < 0:
     close(cid = 0)
     exit(1)
   
-  var dataInStr = $dataIn[]
-  print(addr dataInStr)
+  print(dataIn)
 
-  if dataIn[] == 1010:
+  if dataIn.startsWith("ping"):
     sleep(100)
-
-    var dataOut = 2020
-    send(cid = 0, data = addr dataOut)
-
+    send(cid = 0, data = "pong from task " & $tid)
     sleep(100)
-
-    dataIn = recv[ptr uint64](cid = 0)
-    if dataIn.isNil:
+    if recv[string](cid = 0, dataIn) < 0:
       close(cid = 0)
       exit(1)
-    dataInStr = $dataIn[]
-    print(addr dataInStr)
+    print(dataIn)
 
-  if dataIn[] == 2020:
-    var dataOut = new(int)
-    dataOut[] = 3030
+  elif dataIn.startsWith("pong"):
     sleep(100)
-    send(cid = 0, data = cast[ptr int](dataOut))
+    send(cid = 0, data = "pong from task " & $tid)
 
   close(cid = 0)
   exit(0)

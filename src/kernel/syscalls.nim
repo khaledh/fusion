@@ -13,9 +13,15 @@ import syslib/syscalldef
 
 type
   SyscallHandler = proc (args: ptr SyscallArgs): int
+
   SyscallArgs = object
-    num: uint64
-    arg1, arg2, arg3, arg4, arg5: uint64
+    num: uint64   # rdi
+    arg1: uint64  # rsi
+    arg2: uint64  # rdx
+    arg3: uint64  # r8
+    arg4: uint64  # r9
+    arg5: uint64  # r10
+
   SyscallError* = enum
     InvalidSyscall = -99
     InvalidArg     = -1
@@ -83,7 +89,7 @@ proc syscallEntry() {.asmNoStackFrame.} =
     sysretq
     : "+r"(`currentTask`->rsp)
     : "m"(`currentTask`->kstack.bottom)
-    : "rcx", "r11", "rdi", "rsi", "rdx", "r8", "r9", "r10", "rax", "r15"
+    : "rcx", "r11", "rdi", "rsi", "rdx", "r8", "r9", "r10"
   """
 
 proc syscall(args: ptr SyscallArgs): int {.exportc.} =
@@ -246,6 +252,34 @@ proc channelClose*(args: ptr SyscallArgs): int =
     return InvalidArg.int
 
 ###
+# ChannelAlloc
+###
+proc channelAlloc*(args: ptr SyscallArgs): int =
+  ##
+  ## Allocate memory in a channel buffer.
+  ##
+  ## Arguments:
+  ##   arg1 (in): channel id
+  ##   arg2 (in): size to allocate
+  ##   arg3 (out): pointer to the allocated memory
+  ##
+  ## Returns:
+  ##   The address of the allocated memory
+  ##   -1 on error
+  ##
+  ## Side effects:
+  ##   A block of memory will be allocated in the channel buffer.
+  ##
+  let chid = args.arg1.int
+  let len = args.arg2.int
+  logger.info &"[tid:{getCurrentTask().id}] channelAlloc: chid={chid}, len={len}"
+  let p = channels.alloc(chid, len)
+  if p.isNil:
+    # TODO: return proper error code
+    return InvalidArg.int
+  args.arg3 = cast[uint64](p)
+
+###
 # ChannelSend
 ###
 proc channelSend*(args: ptr SyscallArgs): int =
@@ -292,9 +326,9 @@ proc channelRecv*(args: ptr SyscallArgs): int =
   ## Side effects:
   ##   If the channel is empty, the task will be blocked until there is data in the channel.
   ##
-  let chid = args.arg1
+  let chid = args.arg1.int
   logger.info &"[tid:{getCurrentTask().id}] channelRecv: chid={chid}"
-  let msg = recv(chid.int)
+  let msg = recv(chid)
   if msg.len < 0:
     return InvalidArg.int
   args.arg2 = msg.len.uint64
@@ -344,6 +378,7 @@ proc syscallInit*() =
   syscallTable[SysChannelClose] = channelClose
   syscallTable[SysChannelSend] = channelSend
   syscallTable[SysChannelRecv] = channelRecv
+  syscallTable[SysChannelAlloc] = channelAlloc
 
   syscallTable[SysPrint] = print
 

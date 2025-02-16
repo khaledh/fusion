@@ -2,7 +2,7 @@
   Fusion kernel
 ]#
 
-import common/[bootinfo, libc, malloc, pagetables]
+import common/[bootinfo, libc, malloc, pagetables, serde]
 import
   channels, cpu, ctxswitch, devmgr, drivers/pci, idt, lapic, gfxsrv,
   gdt, pmm, sched, syscalls, taskdef, taskmgr, timer, vmm
@@ -79,7 +79,7 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.info "creating tasks"
 
   var idleTask = createKernelTask(cpu.idle, "idle", TaskPriority.low)
-  let gfxTask = createKernelTask(gfxsrv.start, "gfxsrv")
+  # let gfxTask = createKernelTask(gfxsrv.start, "gfxsrv")
 
   # create user tasks [for testing]
   var utask1 = createUserTask(
@@ -93,16 +93,25 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
     name = "utask2",
   )
 
+  # test channels
+
   logger.info "creating a channel [for testing]"
   let ch = newChannel(msgSize = sizeof(int))
-  var data = new(int)
-  data[] = 1010
-  let msg = Message(len: sizeof(int), data: cast[ptr UncheckedArray[byte]](data))
+
+  proc sendAlloc(size: int): pointer =
+    result = channels.alloc(ch.id, size)
+
+  let packedObj = serialize("ping from kernel", sendAlloc)
+  let size = sizeof(packedObj.len) + packedObj.len
+  let msg = Message(len: size, data: cast[ptr UncheckedArray[byte]](packedObj))
+
   discard send(ch.id, msg)
 
+  # end test channels
 
   logger.info "init scheduler"
-  schedInit([gfxTask, utask1, utask2])
+  # schedInit([gfxTask, utask1, utask2])
+  schedInit([utask1, utask2])
 
   logger.info "switching to the idle task"
   switchTo(idleTask)

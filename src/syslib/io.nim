@@ -4,7 +4,8 @@
 
 include syscalldef
 
-proc print*(pstr: ptr string) =
+proc print*(str: string) =
+  let pstr = str.addr
   asm """
     mov rdi, %0
     mov rsi, %1

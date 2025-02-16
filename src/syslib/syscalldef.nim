@@ -18,3 +18,4 @@ const
   SysChannelClose* = 302
   SysChannelSend* = 303
   SysChannelRecv* = 304
+  SysChannelAlloc* = 305

@@ -12,7 +12,7 @@ import vmm
 ##   - The queue is used to store messages. Tasks don't have direct access to the queue.
 ##     They send/receive messages through system calls.
 ##   - The buffer is used to store data. Each message has a pointer to the data in the buffer.
-##   - The buffer is divided into equal sized slots. Each slot is used to store a message.
+##   - The buffer is allocated to variable-sized message data in a first-in-first-out manner.
 ##   - The buffer is circular.
 ##   - Buffers are shared between tasks communicating through the same channel.
 ##   - Read/write access to the buffer is enforced through virtual memory page mappings.
@@ -43,12 +43,12 @@ type
   ChannelBuffer* = object
     cap*: int
     data*: ptr UncheckedArray[byte]
+    allocOffset*: int = 0
 
   Channel* = ref object
     id*: int
     queue: BlockingQueue[Message]
     buffer: ChannelBuffer
-    nextSlot: int = 0
     writeLock: Lock
 
   ChannelMode* = enum
@@ -71,9 +71,6 @@ proc newChannelId(): int =
   withLock(nextChannelIdLock):
     result = nextChannelId
     inc nextChannelId
-
-proc advanceSlot(ch: Channel) =
-  ch.nextSlot = (ch.nextSlot + 1) mod ch.queue.cap
 
 proc newChannel*(msgSize: int, msgCapacity: int = DefaultMessageCapacity): Channel =
   let buffSize = msgSize * msgCapacity
@@ -100,6 +97,7 @@ proc newChannel*(msgSize: int, msgCapacity: int = DefaultMessageCapacity): Chann
     writeLock: newSpinLock(),
   )
   channels[result.id] = result
+  logger.info &"newChannel: created channel id {result.id} @ {cast[uint64](result.buffer.data):#x}"
 
 proc open*(chid: int, task: Task, mode: ChannelMode): int =
   ## Open a channel for a task in a specific mode. Map the buffer to the task's address space.
@@ -141,30 +139,44 @@ proc close*(chid: int, task: Task): int =
   )
   logger.info &"close: closed channel id {chid} for task {task.id}"
 
+proc alloc*(chid: int, len: int): pointer {.stackTrace:off.} =
+  if not channels.hasKey(chid):
+    logger.info &"alloc: channel id {chid} not found"
+    return nil
+
+#  logger.info &"alloc: allocating message (len: {len}) @ chid={chid}"
+
+  var ch = channels[chid]
+  withLock(ch.writeLock):
+    if ch.buffer.allocOffset + len > ch.buffer.cap:
+      # TODO: wrap around the buffer
+      logger.info &"alloc: buffer full @ chid={chid}"
+      return nil
+    
+    let data = ch.buffer.data +! ch.buffer.allocOffset
+    inc ch.buffer.allocOffset, len
+
+    logger.info &"alloc: allocated message (len: {len}, addr: {cast[uint64](data):#x}) @ chid={chid}"
+    result = data
+
 proc send*(chid: int, msg: Message): int {.stackTrace:off.} =
   if not channels.hasKey(chid):
     logger.info &"send: channel id {chid} not found"
     return -1
 
-  logger.info &"send: sending message @ chid={chid}"
+#  logger.info &"send: sending message @ chid={chid}"
 
   var ch = channels[chid]
   withLock(ch.writeLock):
-    # copy message data to the buffer
-    let offset = ch.nextSlot * msg.len
-    let data = ch.buffer.data +! offset
-    copyMem(data, msg.data, msg.len)
-    ch.advanceSlot()
-
-    ch.queue.enqueue(Message(len: msg.len, data: data))
-    logger.info &"send: enqueued message (len: {msg.len}, addr: {cast[uint64](data):#x}) @ chid={chid}"
+    ch.queue.enqueue(msg)
+    logger.info &"send: enqueued message (len: {msg.len}, addr: {cast[uint64](msg.data):#x}) @ chid={chid}"
 
 proc recv*(chid: int): Message {.stackTrace:off.} =
   if not channels.hasKey(chid):
     logger.info &"recv: channel id {chid} not found"
     return NullMessage
 
-  logger.info &"recv: receiving message @ chid={chid}"
+#  logger.info &"recv: receiving message @ chid={chid}"
 
   result = channels[chid].queue.dequeue()
   logger.info &"recv: dequeued message (len: {result.len}, addr: {cast[uint64](result.data):#x}) @ chid={chid}"

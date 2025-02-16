@@ -1,6 +1,7 @@
 #[
   Channel library functions
 ]#
+import common/serde
 
 include syscalldef
 
@@ -8,7 +9,6 @@ type
   ChannelMode* = enum
     Read
     Write
-
 
 proc open*(cid: int, mode: ChannelMode): int {.stackTrace: off.} =
   ## Open a channel
@@ -52,7 +52,41 @@ proc close*(cid: int): int {.discardable.} =
     : "rdi", "rsi"
   """
 
-proc send*[T: ptr](cid: int, data: T): int {.discardable.} =
+proc alloc*(cid: int, len: int): pointer {.stackTrace: off.} =
+  ## Allocate memory in a channel buffer
+  ## 
+  ## Arguments:
+  ##   chid (in): channel id
+  ##   len (in): size to allocate
+  ##   pdata (out): pointer to the allocated memory
+  ## 
+  ## Returns:
+  ##   0 on success
+  ##  -1 on error
+  ##
+
+  var
+    pdata: pointer
+    ret: int
+
+  asm """
+    mov rdi, %2
+    mov rsi, %3
+    mov rdx, %4
+    syscall
+    mov %1, r8
+    : "=a" (`ret`),
+      "=r" (`pdata`)
+    : "r" (`SysChannelAlloc`), "r" (`cid`), "r" (`len`)
+    : "rdi", "rsi", "rdx"
+  """
+
+  if ret < 0:
+    return nil
+
+  return pdata
+
+proc send*[T](cid: int, data: T): int {.discardable.} =
   ## Send data to a channel
   ## 
   ## Arguments:
@@ -65,8 +99,11 @@ proc send*[T: ptr](cid: int, data: T): int {.discardable.} =
   ##  -1 on error
   ##
 
-  # convert T to len and data
-  let len = sizeof(T)
+  proc sendAlloc(size: int): pointer =
+    result = alloc(cid, size)
+
+  let packedObj = serialize(data, sendAlloc)
+  let size = sizeof(packedObj.len) + packedObj.len
 
   asm """
     mov rdi, %1
@@ -75,17 +112,15 @@ proc send*[T: ptr](cid: int, data: T): int {.discardable.} =
     mov r8, %4
     syscall
     : "=a" (`result`)
-    : "r" (`SysChannelSend`), "r" (`cid`), "r" (`len`), "m" (`data`)
+    : "r" (`SysChannelSend`), "r" (`cid`), "r" (`size`), "m" (`packedObj`)
     : "rdi", "rsi", "rdx", "r8"
   """
 
-proc recv*[T: ptr](cid: int): T =
+proc recv*[T](cid: int, data: var T): int =
   ## Receive data from a channel
   ## 
   ## Arguments:
   ##   chid (in): channel id
-  ##   len (out): data length
-  ##   data (out): pointer to data
   ## 
   ## Returns:
   ##   0 on success
@@ -94,8 +129,7 @@ proc recv*[T: ptr](cid: int): T =
 
   var
     len: int
-    pdata: ptr T
-    ret: int
+    packedObj: ptr PackedObj
 
   asm """
     mov rdi, %3
@@ -103,18 +137,13 @@ proc recv*[T: ptr](cid: int): T =
     syscall
     mov %1, rdx
     mov %2, r8
-    : "=a" (`ret`),
-      "=r" (`len`), "=r" (`pdata`)
+    : "=a" (`result`),
+      "=r" (`len`), "=r" (`packedObj`)
     : "r" (`SysChannelRecv`), "r" (`cid`)
     : "rdi", "rsi", "rdx", "r8"
   """
 
-  if ret < 0:
-    return nil
+  if result < 0:
+    return
 
-  # check if the data length matches the size of T
-  if len != sizeof(T):
-    return nil
-
-  # convert to T
-  result = cast[T](pdata)
+  data = deserialize(packedObj)

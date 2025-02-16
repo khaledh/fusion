@@ -40,14 +40,14 @@ proc enqueue*[T](q: BlockingQueue[T], item: T) =
       logger.info "queue is full, waiting"
       q.notFull.wait(q.lock)
 
-    logger.info "enqueuing item"
+    # logger.info "enqueuing item"
     q.items.add(item)
     q.notEmpty.signal
 
 proc enqueueNoWait*[T](q: BlockingQueue[T], item: T) =
   withLock(q.lock):
     if q.items.len < q.cap:
-      logger.info "enqueuing item"
+      # logger.info "enqueuing item"
       q.items.add(item)
       q.notEmpty.signal
 
@@ -57,13 +57,13 @@ proc dequeue*[T](q: BlockingQueue[T]): T =
       logger.info "queue is empty, waiting"
       q.notEmpty.wait(q.lock)
 
-    logger.info "dequeueing item"
+    # logger.info "dequeueing item"
     result = q.items.pop
     q.notFull.signal
 
 proc dequeueNoWait*[T](q: BlockingQueue[T]): T =
   withLock(q.lock):
     if q.items.len > 0:
-      logger.info "dequeueing item"
+      # logger.info "dequeueing item"
       result = q.items.pop
       q.notFull.signal
