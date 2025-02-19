@@ -1,5 +1,17 @@
 #[
   Physical memory manager (PMM)
+
+  - The physical memory manager uses a free list to keep track of free regions of physical memory.
+  - Reserved physical memory regions are excluded from the free list.
+  - The free list is a singly linked list of PMNode objects, sorted by the address of the regions.
+  - Each PMNode object represents a contiguous region of free physical memory, and is stored at the
+    beginning of the region.
+  - Free regions are split and merged as needed.
+
+  API
+  - `pmInit`: Initialize the physical memory manager.
+  - `pmAlloc`: Allocate a contiguous region of physical memory.
+  - `pmFree`: Free a contiguous region of physical memory.
 ]#
 
 import common/bootinfo
@@ -9,10 +21,12 @@ const
 
 type
   PMNode = object
+    ## A node in the physical memory free list.
     nframes: uint64
     next: ptr PMNode
 
   PMRegion* = object
+    ## A region of physical memory.
     start*: PhysAddr
     nframes*: uint64
   
@@ -20,33 +34,39 @@ type
   OutOfPhysicalMemory* = object of CatchableError
 
 var
-  head: ptr PMNode
-  maxPhysAddr: PhysAddr # exclusive
-  physicalMemoryVirtualBase: uint64
-  reservedRegions: seq[PMRegion]
+  head: ptr PMNode                   ## The head of the free list
+  maxPhysAddr: PhysAddr              ## The maximum physical address (exclusive)
+  physicalMemoryVirtualBase: uint64  ## The virtual base address of the physical memory
+  reservedRegions: seq[PMRegion]     ## Reserved regions of physical memory
 
 proc toPhysAddr(p: ptr PMNode): PhysAddr {.inline.} =
+  ## Convert a node pointer (virtual) to a physical address.
   result = PhysAddr(cast[uint64](p) - physicalMemoryVirtualBase)
 
 proc toPMNodePtr(p: PhysAddr): ptr PMNode {.inline.} =
+  ## Convert a physical address to a node pointer (virtual).
   result = cast[ptr PMNode](cast[uint64](p) + physicalMemoryVirtualBase)
 
 proc endAddr(paddr: PhysAddr, nframes: uint64): PhysAddr =
+  ## Calculate the end address of a region.
   result = paddr +! nframes * FrameSize
 
 proc adjacent(node: ptr PMNode, paddr: PhysAddr): bool =
+  ## Check if the given node region is adjacent to a physical address.
   result = (
     not node.isNil and
     node.toPhysAddr +! node.nframes * FrameSize == paddr
   )
 
 proc adjacent(paddr: PhysAddr, nframes: uint64, node: ptr PMNode): bool =
+  ## Check if the given physical address is adjacent to a node region.
   result = (
     not node.isNil and
     paddr +! nframes * FrameSize == node.toPhysAddr
   )
 
 proc overlaps(region1, region2: PMRegion): bool =
+  ## Check if two physical memory regions overlap.
   var r1 = region1
   var r2 = region2
   if r1.start > r2.start:
@@ -58,6 +78,7 @@ proc overlaps(region1, region2: PMRegion): bool =
   )
 
 proc pmInit*(physMemoryVirtualBase: uint64, memoryMap: MemoryMap) =
+  ## Initialize the physical memory manager.
   physicalMemoryVirtualBase = physMemoryVirtualBase
 
   var prev: ptr PMNode

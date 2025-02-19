@@ -38,9 +38,20 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   pmInit(bootInfo.physicalMemoryVirtualBase, bootInfo.physicalMemoryMap)
 
   logger.info "init vmm"
-  vmInit(bootInfo.physicalMemoryVirtualBase, pmm.pmAlloc)
-  vmAddRegion(kspace, bootInfo.kernelImageVirtualBase.VirtAddr, bootInfo.kernelImagePages)
-  vmAddRegion(kspace, bootInfo.kernelStackVirtualBase.VirtAddr, bootInfo.kernelStackPages)
+  vmInit(
+    physMemoryVirtualBase = bootInfo.physicalMemoryVirtualBase,
+    physAlloc = pmm.pmAlloc,
+    initialRegions = @[
+      VMRegion(
+        start: bootInfo.kernelImageVirtualBase.VirtAddr,
+        npages: bootInfo.kernelImagePages
+      ),
+      VMRegion(
+        start: bootInfo.kernelStackVirtualBase.VirtAddr,
+        npages: bootInfo.kernelStackPages
+      ),
+    ]
+  )
 
   logger.info "init gdt"
   gdtInit()

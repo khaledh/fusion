@@ -14,6 +14,11 @@ type
     vmRegion*: VMRegion
     entryPoint*: pointer
   
+  LoadableSegment = object
+    vaddr: VirtAddr
+    npages: uint64
+    flags: ElfProgramHeaderFlags
+
   LoaderError* = object of CatchableError
 
 
@@ -25,7 +30,7 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
   var dynOffset: int = -1
 
   # get a list of page-aligned memory regions to be mapped
-  var vmRegions: seq[VMRegion] = @[]
+  var segs: seq[LoadableSegment] = @[]
   for (i, ph) in segments(image):
     if ph.type == ElfProgramHeaderType.Load:
       if ph.align != PageSize:
@@ -33,28 +38,28 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
       let startOffset = ph.vaddr mod PageSize
       let startPage = ph.vaddr - startOffset
       let numPages = (startOffset + ph.memsz + PageSize - 1) div PageSize
-      let region = VMRegion(
-        start: startPage.VirtAddr,
+      let seg = LoadableSegment(
+        vaddr: startPage.VirtAddr,
         npages: numPages,
-        flags: cast[VMRegionFlags](ph.flags),
+        flags: ph.flags,
       )
-      vmRegions.add(region)
+      segs.add(seg)
     elif ph.type == ElfProgramHeaderType.Dynamic:
       # debugln &"  Dynamic segment found at {ph.offset:#x}"
       dynOffset = cast[int](ph.vaddr)
 
-  if vmRegions.len == 0:
+  if segs.len == 0:
     raise newException(LoaderError, "No loadable segments found")
 
-  if vmRegions[0].start.uint64 != 0:
+  if segs[0].vaddr.uint64 != 0:
     raise newException(LoaderError, "Expecting a PIE binary with a base address of 0")
 
   if dynOffset == -1:
     raise newException(LoaderError, "No dynamic section found")
 
   # calculate total memory size
-  vmRegions = vmRegions.sortedByIt(it.start)
-  let memSize = vmRegions[^1].end -! vmRegions[0].start
+  segs = segs.sortedByIt(it.vaddr)
+  let memSize = (segs[^1].vaddr +! segs[^1].npages * PageSize) -! segs[0].vaddr
   let pageCount = (memSize + PageSize - 1) div PageSize
 
   # allocate a single contiguous region for the user image
@@ -62,25 +67,31 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
   # debugln &"loader: Allocated {taskRegion.npages} pages at {taskRegion.start.uint64:#x}"
 
   # adjust the individual regions' start addresses based on taskRegion.start
-  for region in vmRegions.mitems:
-    region.start = taskRegion.start +! region.start.uint64
+  for seg in segs.mitems:
+    seg.vaddr = taskRegion.start +! seg.vaddr.uint64
 
   # map each region into the page tables, making sure to set the R/W and NX flags as needed
   # debugln "loader: Mapping user image"
-  for region in vmRegions:
-    let access = if region.flags.contains(Write): paReadWrite else: paRead
-    let noExec = not region.flags.contains(Execute)
-    let physAddr = vmmap(region, pml4, access, pmUser, noExec)
-    # temporarily map the region in kernel space so that we can copy the segments and apply relocations
+  for seg in segs:
+    let region = VMRegion(start: seg.vaddr, npages: seg.npages)
+    let access = if Writable in seg.flags: paReadWrite else: paRead
+    let noExec = Executable notin seg.flags
+    let mappedRegion = vmmap(region, pml4, access, pmUser, noExec)
+    # temporarily map the region in kernel space so that we can copy the segments and
+    # apply relocations
     mapRegion(
       pml4 = kpml4,
-      virtAddr = region.start,
-      physAddr = physAddr,
-      pageCount = region.npages,
+      virtAddr = seg.vaddr,
+      physAddr = mappedRegion.paddr,
+      pageCount = seg.npages,
       pageAccess = paReadWrite,
       pageMode = pmSupervisor,
       noExec = true,
     )
+  defer:
+    # unmap the user image from kernel space on exit
+    for seg in segs:
+      unmapRegion(kpml4, seg.vaddr, seg.npages)
 
   # copy loadable segments from the image to the user memory
   # debugln "loader: Copying segments"
@@ -101,11 +112,6 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
     image = cast[ptr UncheckedArray[byte]](taskRegion.start),
     dynOffset = cast[uint64](dynOffset),
   )
-
-  # unmap the user image from kernel space
-  # debugln "loader: Unmapping user image from kernel space"
-  for region in vmRegions:
-    unmapRegion(kpml4, region.start, region.npages)
 
   result = LoadedElfImage(
     vmRegion: taskRegion,
