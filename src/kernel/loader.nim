@@ -80,10 +80,9 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
     # temporarily map the region in kernel space so that we can copy the segments and
     # apply relocations
     mapRegion(
-      pml4 = kpml4,
-      virtAddr = seg.vaddr,
+      region = VMRegion(start: seg.vaddr, npages: seg.npages),
       physAddr = mappedRegion.paddr,
-      pageCount = seg.npages,
+      pml4 = kpml4,
       pageAccess = paReadWrite,
       pageMode = pmSupervisor,
       noExec = true,
@@ -91,7 +90,10 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
   defer:
     # unmap the user image from kernel space on exit
     for seg in segs:
-      unmapRegion(kpml4, seg.vaddr, seg.npages)
+      unmapRegion(
+        region = VMRegion(start: seg.vaddr, npages: seg.npages),
+        pml4 = kpml4,
+      )
 
   # copy loadable segments from the image to the user memory
   # debugln "loader: Copying segments"

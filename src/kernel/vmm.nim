@@ -191,144 +191,162 @@ proc v2p*(virt: VirtAddr): Option[PhysAddr] =
   v2p(virt, getActivePML4())
 
 ##########################################################################################
-# Map a single page
+# Map / unmap VM regions
 ##########################################################################################
 
-proc getOrCreateEntry[P, C](parent: ptr P, index: uint64): ptr C =
+proc getOrCreateEntry[P, C](
+  parent: ptr P,
+  index: uint64
+): tuple[p: ptr C, created: bool] =
   var physAddr: PhysAddr
+
   if parent[index].present == 1:
     physAddr = PhysAddr(parent[index].physAddress shl 12)
+    result.created = true
   else:
     physAddr = pmalloc(1)
     parent[index].physAddress = physAddr.uint64 shr 12
     parent[index].present = 1
-  result = cast[ptr C](p2v(physAddr))
 
-proc mapPage(
-  pml4: ptr PML4Table,
-  virtAddr: VirtAddr,
+  result.p = cast[ptr C](p2v(physAddr))
+
+proc mapRegion*(
+  region: VMRegion,
   physAddr: PhysAddr,
+  pml4: ptr PML4Table,
   pageAccess: PageAccess,
   pageMode: PageMode,
   noExec: bool = false,
 ) =
-  ## Map a single page in the given page table structure.
-  let pml4Index = (virtAddr.uint64 shr 39) and 0x1FF
-  let pdptIndex = (virtAddr.uint64 shr 30) and 0x1FF
-  let pdIndex = (virtAddr.uint64 shr 21) and 0x1FF
-  let ptIndex = (virtAddr.uint64 shr 12) and 0x1FF
-
+  ## Map a range of pages in the given page table structure. The physical memory must be
+  ## allocated before calling this function.
   let
     access = cast[uint64](pageAccess)
     mode = cast[uint64](pageMode)
     noExec = cast[uint64](noExec)
 
-  # Page Map Level 4 Table
-  pml4[pml4Index].write = access
-  pml4[pml4Index].user = mode
-  var pdpt = getOrCreateEntry[PML4Table, PDPTable](pml4, pml4Index)
+  var virtAddr = region.start
+  var physAddr = physAddr
 
-  # Page Directory Pointer Table
-  pdpt[pdptIndex].write = access
-  pdpt[pdptIndex].user = mode
-  var pd = getOrCreateEntry[PDPTable, PDTable](pdpt, pdptIndex)
+  var pml4Index, pdptIndex, pdIndex, ptIndex: uint64
+  var pdpt: ptr PDPTable
+  var pd: ptr PDTable
+  var pt: ptr PTable
+  var created = false
 
-  # Page Directory
-  pd[pdIndex].write = access
-  pd[pdIndex].user = mode
-  var pt = getOrCreateEntry[PDTable, PTable](pd, pdIndex)
+  for i in 0 ..< region.npages:
+    pml4Index = (virtAddr.uint64 shr 39) and 0x1FF
+    pdptIndex = (virtAddr.uint64 shr 30) and 0x1FF
+    pdIndex = (virtAddr.uint64 shr 21) and 0x1FF
+    ptIndex = (virtAddr.uint64 shr 12) and 0x1FF
 
-  # Page Table
-  pt[ptIndex].physAddress = physAddr.uint64 shr 12
-  pt[ptIndex].present = 1
-  pt[ptIndex].write = access
-  pt[ptIndex].user = mode
-  pt[ptIndex].xd = noExec
+    # Page Map Level 4 Table
+    pml4[pml4Index].write = access
+    pml4[pml4Index].user = mode
 
-proc unmapPage(pml4: ptr PML4Table, virtAddr: VirtAddr) =
-  let pml4Index = (virtAddr.uint64 shr 39) and 0x1FF
-  let pdptIndex = (virtAddr.uint64 shr 30) and 0x1FF
-  let pdIndex = (virtAddr.uint64 shr 21) and 0x1FF
-  let ptIndex = (virtAddr.uint64 shr 12) and 0x1FF
+    # Page Directory Pointer Table
+    (pdpt, created) = getOrCreateEntry[PML4Table, PDPTable](pml4, pml4Index)
+    pdpt[pdptIndex].write = access
+    pdpt[pdptIndex].user = mode
+    if created:
+      # use the ignored bits of the parent to keep track of child entries count
+      if pml4[pml4Index].ignored3 < 512:
+        inc pml4[pml4Index].ignored3
 
-  let pml4Entry = pml4[pml4Index]
-  if pml4Entry.present == 0:
-    return
-  let pdpt = cast[ptr PDPTable](p2v(PhysAddr(pml4Entry.physAddress shl 12)))
+    # Page Directory
+    (pd, created) = getOrCreateEntry[PDPTable, PDTable](pdpt, pdptIndex)
+    pd[pdIndex].write = access
+    pd[pdIndex].user = mode
+    if created:
+      # use the ignored bits of the parent to keep track of child entries count
+      if pdpt[pdptIndex].ignored3 < 512:
+        inc pdpt[pdptIndex].ignored3
 
-  let pdptEntry = pdpt[pdptIndex]
-  if pdptEntry.present == 0:
-    return
-  let pd = cast[ptr PDTable](p2v(PhysAddr(pdptEntry.physAddress shl 12)))
+    # Page Table
+    (pt, created) = getOrCreateEntry[PDTable, PTable](pd, pdIndex)
+    pt[ptIndex].physAddress = physAddr.uint64 shr 12
+    pt[ptIndex].present = 1
+    pt[ptIndex].write = access
+    pt[ptIndex].user = mode
+    pt[ptIndex].xd = noExec
+    if created:
+      # use the ignored bits of the parent to keep track of child entries count
+      if pd[pdIndex].ignored3 < 512:
+        inc pd[pdIndex].ignored3
 
-  let pdEntry = pd[pdIndex]
-  if pdEntry.present == 0:
-    return
-  let pt = cast[ptr PTable](p2v(PhysAddr(pdEntry.physAddress shl 12)))
-
-  var ptEntry = pt[ptIndex]
-  if ptEntry.present == 0:
-    return
-
-  ptEntry.present = 0
-
-##########################################################################################
-# Map a range of pages
-##########################################################################################
-
-proc mapRegion*(
-  pml4: ptr PML4Table,
-  virtAddr: VirtAddr,
-  physAddr: PhysAddr,
-  pageCount: uint64,
-  pageAccess: PageAccess,
-  pageMode: PageMode,
-  noExec: bool = false,
-) =
-  ## Map a range of pages in the given page table structure at the given physical address.
-  ## The physical memory must be allocated beforehand.
-  var virtStart = virtAddr
-  var physStart = physAddr
-  for i in 0 ..< pageCount:
-    mapPage(pml4, virtStart, physStart, pageAccess, pageMode, noExec)
-    inc virtStart, PageSize
-    inc physStart, PageSize
+    inc virtAddr, PageSize
+    inc physAddr, PageSize
 
 proc mapRegion*(
+  region: VMRegion,
   pml4: ptr PML4Table,
-  virtAddr: VirtAddr,
-  pageCount: uint64,
   pageAccess: PageAccess,
   pageMode: PageMode,
   noExec: bool = false,
 ) =
   ## Map a range of pages in the given page table structure. The physical memory is
   ## allocated automatically.
-  let physAddr = pmalloc(pageCount)
-  mapRegion(pml4, virtAddr, physAddr, pageCount, pageAccess, pageMode, noExec)
+  let physAddr = pmalloc(region.npages)
+  mapRegion(region, physAddr, pml4, pageAccess, pageMode, noExec)
 
-proc identityMapRegion*(
-  pml4: ptr PML4Table,
-  physAddr: PhysAddr,
-  pageCount: uint64,
-  pageAccess: PageAccess,
-  pageMode: PageMode,
-  noExec: bool = false,
-) =
-  ## Identity map a range of pages in the given page table structure at the given physical
-  ## address. The physical memory must be allocated beforehand.
-  mapRegion(pml4, physAddr.VirtAddr, physAddr, pageCount, pageAccess, pageMode, noExec)
+proc unmapRegion*(region: VMRegion, pml4: ptr PML4Table) =
+  var virtAddr = region.start
 
-proc unmapRegion*(
-  pml4: ptr PML4Table,
-  virtAddr: VirtAddr,
-  pageCount: uint64,
-) =
-  ## Unmap a range of pages in the given page table structure.
-  var virtStart = virtAddr
-  for i in 0 ..< pageCount:
-    unmapPage(pml4, virtStart)
-    inc virtStart, PageSize
+  var pml4Index, pdptIndex, pdIndex, ptIndex: uint64
+
+  for i in 0 ..< region.npages:
+    pml4Index = (virtAddr.uint64 shr 39) and 0x1FF
+    pdptIndex = (virtAddr.uint64 shr 30) and 0x1FF
+    pdIndex = (virtAddr.uint64 shr 21) and 0x1FF
+    ptIndex = (virtAddr.uint64 shr 12) and 0x1FF
+
+    var pml4Entry = pml4[pml4Index]
+    if pml4Entry.present == 0:
+      continue
+
+    let pdpt = cast[ptr PDPTable](p2v(PhysAddr(pml4Entry.physAddress shl 12)))
+    var pdptEntry = pdpt[pdptIndex]
+    if pdptEntry.present == 0:
+      continue
+
+    let pd = cast[ptr PDTable](p2v(PhysAddr(pdptEntry.physAddress shl 12)))
+    var pdEntry = pd[pdIndex]
+    if pdEntry.present == 0:
+      continue
+
+    let pt = cast[ptr PTable](p2v(PhysAddr(pdEntry.physAddress shl 12)))
+    var ptEntry = pt[ptIndex]
+    if ptEntry.present == 0:
+      continue
+
+    # walk up the page tables and free the parent if all children are gone
+
+    # free the PT entry
+    ptEntry.present = 0
+    # pmFree(PhysAddr(ptEntry.physAddress shl 12), 1)
+
+    # if pdEntry.ignored3 > 0:
+    #   dec pdEntry.ignored3
+    #   if pdEntry.ignored3 == 0:
+    #     # free the PD entry
+    #     pdEntry.present = 0
+    #     pmFree(PhysAddr(pdEntry.physAddress shl 12), 1)
+
+    #     if pdptEntry.ignored3 > 0:
+    #       dec pdptEntry.ignored3
+    #       if pdptEntry.ignored3 == 0:
+    #         # free the PDPT entry
+    #         pdptEntry.present = 0
+    #         pmFree(PhysAddr(pdptEntry.physAddress shl 12), 1)
+
+    #         if pml4Entry.ignored3 > 0:
+    #           dec pml4Entry.ignored3
+    #           if pml4Entry.ignored3 == 0:
+    #             # free the PML4 entry
+    #             pml4Entry.present = 0
+    #             pmFree(PhysAddr(pml4Entry.physAddress shl 12), 1)
+
+    inc virtAddr, PageSize
 
 ##########################################################################################
 # Allocate and map virtual memory
@@ -364,7 +382,7 @@ proc vmmap*(
 
   # allocate physical memory and map the region
   let paddr = pmalloc(region.npages)
-  mapRegion(pml4, region.start, paddr, region.npages, pageAccess, pageMode, noExec)
+  mapRegion(region, paddr, pml4, pageAccess, pageMode, noExec)
 
   # map the flags and return the mapped region
   var flags = { VMMappedRegionFlag.Read }

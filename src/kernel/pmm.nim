@@ -206,7 +206,7 @@ proc pmFree*(paddr: PhysAddr, nframes: uint64) =
   # the region to be freed is between prev and curr (either of them can be nil)
 
   if prev.isNil and curr.isNil:
-    debugln "pmFree: the list is empty"
+    # debugln "pmFree: the list is empty"
     # the list is empty
     var newnode = paddr.toPMNodePtr
     newnode.nframes = nframes
@@ -214,7 +214,7 @@ proc pmFree*(paddr: PhysAddr, nframes: uint64) =
     head = newnode
 
   elif prev.isNil and adjacent(paddr, nframes, curr):
-    debugln "pmFree: at the beginning, adjacent to curr"
+    # debugln "pmFree: at the beginning, adjacent to curr"
     # at the beginning, adjacent to curr
     var newnode = paddr.toPMNodePtr
     newnode.nframes = nframes + curr.nframes
@@ -222,19 +222,19 @@ proc pmFree*(paddr: PhysAddr, nframes: uint64) =
     head = newnode
 
   elif curr.isNil and adjacent(prev, paddr):
-    debugln "pmFree: at the end, adjacent to prev"
+    # debugln "pmFree: at the end, adjacent to prev"
     # at the end, adjacent to prev
     prev.nframes += nframes
 
   elif adjacent(prev, paddr) and adjacent(paddr, nframes, curr):
-    debugln "pmFree: exactly between prev and curr"
+    # debugln "pmFree: exactly between prev and curr"
     # exactly between prev and curr
     prev.nframes += nframes + curr.nframes
     prev.next = curr.next
 
   else:
     # not adjacent to any other region
-    debugln "pmFree: not adjacent to any other region"
+    # debugln "pmFree: not adjacent to any other region"
     var newnode = paddr.toPMNodePtr
     newnode.nframes = nframes
     newnode.next = curr

@@ -91,10 +91,9 @@ proc mapFramebuffer*(width, height: uint32): tuple[virtAddr: uint64, numPages: u
   let numPages = (width.uint64 * height.uint64 * 4 + (PageSize - 1)) div PageSize
   let vmRegion = vmalloc(kspace, numPages)
   mapRegion(
-    pml4 = getActivePML4(),
-    virtAddr = vmRegion.start,
+    region = VMRegion(start: vmRegion.start, npages: numPages),
     physAddr = fbPhysAddr.PhysAddr,
-    pageCount = numPages,
+    pml4 = getActivePML4(),
     pageAccess = paReadWrite,
     pageMode = pmSupervisor,
     noExec = true
@@ -103,9 +102,8 @@ proc mapFramebuffer*(width, height: uint32): tuple[virtAddr: uint64, numPages: u
 
 proc unmapFramebuffer*(virtAddr, numPages: uint64) =
     unmapRegion(
+      region = VMRegion(start: virtAddr.VirtAddr, npages: numPages),
       pml4 = getActivePML4(),
-      virtAddr = virtAddr.VirtAddr,
-      pageCount = numPages,
     )
 
 proc setResolution*(xres, yres: uint16) =

@@ -485,23 +485,58 @@ proc createPageTable(
 
   # identity-map bootloader image
   debugln &"""boot:   {"Identity-mapping bootloader\:":<30} base={bootloaderBase:#010x}, pages={bootloaderPages}"""
-  identityMapRegion(pml4, bootloaderBase.PhysAddr, bootloaderPages.uint64, paReadWrite, pmSupervisor)
+  mapRegion(
+    VMRegion(start: bootloaderBase.VirtAddr, npages: bootloaderPages),
+    bootloaderBase.PhysAddr,
+    pml4,
+    paReadWrite,
+    pmSupervisor,
+    noExec = false,
+  )
 
   # identity-map boot info
   debugln &"""boot:   {"Identity-mapping BootInfo\:":<30} base={bootInfoBase:#010x}, pages={bootInfoPages}"""
-  identityMapRegion(pml4, bootInfoBase.PhysAddr, bootInfoPages, paReadWrite, pmSupervisor)
+  mapRegion(
+    VMRegion(start: bootInfoBase.VirtAddr, npages: bootInfoPages),
+    bootInfoBase.PhysAddr,
+    pml4,
+    paReadWrite,
+    pmSupervisor,
+    noExec = true,
+  )
 
   # map kernel to higher half
   debugln &"""boot:   {"Mapping kernel to higher half\:":<30} base={KernelVirtualBase:#010x}, pages={kernelImagePages}"""
-  mapRegion(pml4, KernelVirtualBase.VirtAddr, kernelImageBase.PhysAddr, kernelImagePages, paReadWrite, pmSupervisor)
+  mapRegion(
+    VMRegion(start: KernelVirtualBase.VirtAddr, npages: kernelImagePages),
+    kernelImageBase.PhysAddr,
+    pml4,
+    paReadWrite,
+    pmSupervisor,
+    noExec = false,
+  )
 
   # map kernel stack
   debugln &"""boot:   {"Mapping kernel stack\:":<30} base={KernelStackVirtualBase:#010x}, pages={kernelStackPages}"""
-  mapRegion(pml4, KernelStackVirtualBase.VirtAddr, kernelStackBase.PhysAddr, kernelStackPages, paReadWrite, pmSupervisor)
+  mapRegion(
+    VMRegion(start: KernelStackVirtualBase.VirtAddr, npages: kernelStackPages),
+    kernelStackBase.PhysAddr,
+    pml4,
+    paReadWrite,
+    pmSupervisor,
+    noExec = true,
+  )
 
   # map all physical memory; assume 128 MiB of physical memory
   debugln &"""boot:   {"Mapping physical memory\:":<30} base={PhysicalMemoryVirtualBase:#010x}, pages={physMemoryPages}"""
-  mapRegion(pml4, PhysicalMemoryVirtualBase.VirtAddr, 0.PhysAddr, physMemoryPages, paReadWrite, pmSupervisor)
+  mapRegion(
+    VMRegion(start: PhysicalMemoryVirtualBase.VirtAddr, npages: physMemoryPages),
+    0.PhysAddr,
+    pml4,
+    paReadWrite,
+    pmSupervisor,
+    noExec = true,
+  )
 
   result = pml4
 
