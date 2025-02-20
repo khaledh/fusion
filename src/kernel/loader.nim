@@ -12,6 +12,7 @@ include elf
 type
   LoadedElfImage* = object
     vmRegion*: VMRegion
+    vmMappedRegions*: seq[VMMappedRegion]
     entryPoint*: pointer
   
   LoadableSegment = object
@@ -21,11 +22,15 @@ type
 
   LoaderError* = object of CatchableError
 
+let
+  logger = DebugLogger(name: "loader")
 
 proc applyRelocations(image: ptr UncheckedArray[byte], dynOffset: uint64)
 
 proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
   let image = initElfImage(imagePtr)
+
+  logger.info &"loading ELF image from {cast[uint64](imagePtr):#x}"
 
   var dynOffset: int = -1
 
@@ -71,15 +76,17 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
     seg.vaddr = taskRegion.start +! seg.vaddr.uint64
 
   # map each region into the page tables, making sure to set the R/W and NX flags as needed
-  # debugln "loader: Mapping user image"
+  logger.info &"mapping {segs.len} ELF image segments"
+  var taskMappedRegions: seq[VMMappedRegion]
   for seg in segs:
     let region = VMRegion(start: seg.vaddr, npages: seg.npages)
     let access = if Writable in seg.flags: paReadWrite else: paRead
     let noExec = Executable notin seg.flags
     let mappedRegion = vmmap(region, pml4, access, pmUser, noExec)
+    taskMappedRegions.add(mappedRegion)
     # temporarily map the region in kernel space so that we can copy the segments and
     # apply relocations
-    mapRegion(
+    vmmap(
       region = VMRegion(start: seg.vaddr, npages: seg.npages),
       physAddr = mappedRegion.paddr,
       pml4 = kpml4,
@@ -89,9 +96,10 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
     )
   defer:
     # unmap the user image from kernel space on exit
-    for seg in segs:
-      unmapRegion(
-        region = VMRegion(start: seg.vaddr, npages: seg.npages),
+    for mappedRegion in taskMappedRegions:
+      vmfree(
+        space = kspace,
+        region = mappedRegion,
         pml4 = kpml4,
       )
 
@@ -109,7 +117,7 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
       zeroMem(cast[pointer](cast[uint64](dest) + ph.filesz), ph.memsz - ph.filesz)
 
   # apply relocations
-  # debugln "loader: Applying relocations"
+  logger.info "applying relocations in ELF image"
   applyRelocations(
     image = cast[ptr UncheckedArray[byte]](taskRegion.start),
     dynOffset = cast[uint64](dynOffset),
@@ -117,6 +125,7 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
 
   result = LoadedElfImage(
     vmRegion: taskRegion,
+    vmMappedRegions: taskMappedRegions,
     entryPoint: cast[pointer](taskRegion.start +! image.header.entry)
   )
   # debugln &"loader: Entry point: {cast[uint64](result.entryPoint):#x}"

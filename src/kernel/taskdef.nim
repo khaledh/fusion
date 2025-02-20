@@ -23,7 +23,7 @@ type
     remainingQuantumMs*: uint64 = InitialQuantumMs
     sleepUntil*: uint64  # based on apic timer count
     # user task fields
-    vmRegions*: seq[VMRegion]
+    vmRegions*: seq[VMMappedRegion]
     pml4*: ptr PML4Table
     ustack*: TaskStack
     kstack*: TaskStack

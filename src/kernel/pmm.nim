@@ -30,14 +30,27 @@ type
     start*: PhysAddr
     nframes*: uint64
   
+  PageFrame* = object
+    ## A page frame in physical memory.
+    paddr*: PhysAddr
+    rc*: uint16       # reference count
+
   InvalidRequest* = object of CatchableError
   OutOfPhysicalMemory* = object of CatchableError
+
+let
+  logger = DebugLogger(name: "pmm")
 
 var
   head: ptr PMNode                   ## The head of the free list
   maxPhysAddr: PhysAddr              ## The maximum physical address (exclusive)
   physicalMemoryVirtualBase: uint64  ## The virtual base address of the physical memory
   reservedRegions: seq[PMRegion]     ## Reserved regions of physical memory
+  pageFrames: seq[PageFrame]         ## Page frames in physical memory
+
+##########################################################################################
+# Utility functions
+###########################################################################################
 
 proc toPhysAddr(p: ptr PMNode): PhysAddr {.inline.} =
   ## Convert a node pointer (virtual) to a physical address.
@@ -47,9 +60,13 @@ proc toPMNodePtr(p: PhysAddr): ptr PMNode {.inline.} =
   ## Convert a physical address to a node pointer (virtual).
   result = cast[ptr PMNode](cast[uint64](p) + physicalMemoryVirtualBase)
 
-proc endAddr(paddr: PhysAddr, nframes: uint64): PhysAddr =
-  ## Calculate the end address of a region.
+proc endAddr(paddr: PhysAddr, nframes: uint64): PhysAddr {.inline.} =
+  ## Calculate the end address given a physical address and the number of frames.
   result = paddr +! nframes * FrameSize
+
+proc endAddr(region: PMRegion): PhysAddr {.inline.} =
+  ## Calculate the end address of a region.
+  result = endAddr(region.start, region.nframes)
 
 proc adjacent(node: ptr PMNode, paddr: PhysAddr): bool =
   ## Check if the given node region is adjacent to a physical address.
@@ -65,6 +82,13 @@ proc adjacent(paddr: PhysAddr, nframes: uint64, node: ptr PMNode): bool =
     paddr +! nframes * FrameSize == node.toPhysAddr
   )
 
+proc adjacent(region1, region2: PMRegion): bool =
+  ## Check if two physical memory regions are adjacent.
+  result = (
+    region1.endAddr == region2.start or
+    region2.endAddr == region1.start
+  )
+
 proc overlaps(region1, region2: PMRegion): bool =
   ## Check if two physical memory regions overlap.
   var r1 = region1
@@ -76,6 +100,10 @@ proc overlaps(region1, region2: PMRegion): bool =
     r1.start < endAddr(r2.start, r2.nframes) and
     r2.start < endAddr(r1.start, r1.nframes)
   )
+
+##########################################################################################
+# Initialization
+##########################################################################################
 
 proc pmInit*(physMemoryVirtualBase: uint64, memoryMap: MemoryMap) =
   ## Initialize the physical memory manager.
@@ -109,23 +137,28 @@ proc pmInit*(physMemoryVirtualBase: uint64, memoryMap: MemoryMap) =
     elif i > 0:
       # check if there's a gap between the previous entry and the current entry
       let prevEntry = memoryMap.entries[i - 1]
-      let gap = entry.start.PhysAddr - endAddr(prevEntry.start.PhysAddr, prevEntry.nframes)
+      let gap = (
+        entry.start.PhysAddr - endAddr(prevEntry.start.PhysAddr, prevEntry.nframes)
+      )
       if gap > 0:
         reservedRegions.add(PMRegion(
           start: endAddr(prevEntry.start.PhysAddr, prevEntry.nframes),
           nframes: gap div FrameSize
         ))
+    
+  # initialize pageFrames
+  let totalPages = maxPhysAddr.uint64 div FrameSize
+  logger.info &"Total pages: {totalPages}"
+  logger.info &"pageFrames size: {totalPages * sizeof(PageFrame).uint64} bytes"
+  pageFrames = newSeq[PageFrame](totalPages)
 
-iterator pmFreeRegions*(): tuple[paddr: PhysAddr, nframes: uint64] =
-  ## Iterate over all physical memory regions.
-  var node = head
-  while not node.isNil:
-    yield (node.toPhysAddr, node.nframes)
-    node = node.next
+##########################################################################################
+# Alloc / Alias
+##########################################################################################
 
-proc pmAlloc*(nframes: uint64): PhysAddr =
+proc pmAlloc*(nframes: Positive): PhysAddr =
   ## Allocate a contiguous region of physical memory.
-  assert nframes > 0, "Number of frames must be positive"
+  let nframes = nframes.uint64
 
   var
     prev: ptr PMNode
@@ -158,13 +191,45 @@ proc pmAlloc*(nframes: uint64): PhysAddr =
   zeroMem(curr, nframes * FrameSize)
   result = curr.toPhysAddr
 
+  # increment the reference count
+  var pfn = curr.toPhysAddr.uint64 div FrameSize
+  for i in 0 ..< nframes:
+    if pfn >= pageFrames.len.uint64:
+      let paddr = pfn * FrameSize
+      raise newException(InvalidRequest, &"Physical address {paddr:#x} is out of range")
+    inc pageFrames[pfn].rc
+    inc pfn
+
+proc pmAlias*(paddr: PhysAddr, nframes: Positive) =
+  ## Increment the reference count of a region of physical memory. The region must be
+  ## already allocated.
+  if paddr.uint64 mod FrameSize != 0:
+    raise newException(InvalidRequest, &"Unaligned physical address: {paddr.uint64:#x}")
+
+  if paddr.uint64 >= maxPhysAddr.uint64:
+    # the region is outside of the physical memory, probably a hardware device
+    return
+
+  var pfn = paddr.uint64 div FrameSize
+  for i in 0 ..< nframes:
+    let pfnAddr = pfn * FrameSize
+    if pfn >= pageFrames.len.uint64:
+      raise newException(InvalidRequest, &"Physical address {pfnAddr:#x} is out of range")
+    if pageFrames[pfn].rc == 0:
+      raise newException(InvalidRequest, &"Physical address {pfnAddr:#x} is not allocated")
+
+    inc pageFrames[pfn].rc
+    inc pfn
+
+##########################################################################################
+# Free
+##########################################################################################
+
+proc pmFreeRegion(paddr: PhysAddr, nframes: Positive)
 proc pmFree*(paddr: PhysAddr, nframes: uint64) =
   ## Free a contiguous region of physical memory.
   if paddr.uint64 mod FrameSize != 0:
     raise newException(InvalidRequest, &"Unaligned physical address: {paddr.uint64:#x}")
-
-  if nframes == 0:
-    raise newException(InvalidRequest, "Number of frames must be positive")
 
   if paddr +! nframes * FrameSize > maxPhysAddr:
     # the region is outside of the physical memory
@@ -173,7 +238,7 @@ proc pmFree*(paddr: PhysAddr, nframes: uint64) =
       &"Attempt to free a region outside of the physical memory.\n" &
       &"  Request: start={paddr.uint64:#x} + nframes={nframes} > max={maxPhysAddr.uint64:#x}"
     )
-  
+
   for region in reservedRegions:
     if overlaps(region, PMRegion(start: paddr, nframes: nframes)):
       # the region is reserved
@@ -184,6 +249,36 @@ proc pmFree*(paddr: PhysAddr, nframes: uint64) =
         &"  Reserved: start={region.start.uint64:#x}, nframes={region.nframes}"
       )
 
+  # decrement the reference count of each page and build a list of contiguous regions to
+  # free
+  var regions: seq[PMRegion]
+  regions.add(default(PMRegion))
+
+  var pfnAddr = paddr
+  var pfn = paddr.uint64 div FrameSize
+  logger.info &"freeing {nframes} frames at {paddr.uint64:#x}"
+  for i in 0 ..< nframes:
+    if pfn >= pageFrames.len.uint64:
+      raise newException(InvalidRequest, &"Physical address {paddr.uint64:#x} is out of range")
+
+    dec pageFrames[pfn].rc
+    if pageFrames[pfn].rc == 0:
+      inc regions[^1].nframes
+      if regions[^1].start.uint64 == 0:
+        regions[^1].start = pfnAddr
+
+    elif regions[^1].nframes > 0:
+      regions.add(default(PMRegion))
+
+    inc pfn
+    inc pfnAddr, FrameSize
+
+  for region in regions:
+    if region.nframes > 0:
+      pmFreeRegion(region.start, region.nframes)
+
+proc pmFreeRegion(paddr: PhysAddr, nframes: Positive) =
+  let nframes = nframes.uint64
   var
     prev: ptr PMNode
     curr = head
@@ -206,7 +301,7 @@ proc pmFree*(paddr: PhysAddr, nframes: uint64) =
   # the region to be freed is between prev and curr (either of them can be nil)
 
   if prev.isNil and curr.isNil:
-    # debugln "pmFree: the list is empty"
+    # logger.info "pmFree: the list is empty"
     # the list is empty
     var newnode = paddr.toPMNodePtr
     newnode.nframes = nframes
@@ -214,7 +309,7 @@ proc pmFree*(paddr: PhysAddr, nframes: uint64) =
     head = newnode
 
   elif prev.isNil and adjacent(paddr, nframes, curr):
-    # debugln "pmFree: at the beginning, adjacent to curr"
+    # logger.info "pmFree: at the beginning, adjacent to curr"
     # at the beginning, adjacent to curr
     var newnode = paddr.toPMNodePtr
     newnode.nframes = nframes + curr.nframes
@@ -222,19 +317,19 @@ proc pmFree*(paddr: PhysAddr, nframes: uint64) =
     head = newnode
 
   elif curr.isNil and adjacent(prev, paddr):
-    # debugln "pmFree: at the end, adjacent to prev"
+    # logger.info "pmFree: at the end, adjacent to prev"
     # at the end, adjacent to prev
     prev.nframes += nframes
 
   elif adjacent(prev, paddr) and adjacent(paddr, nframes, curr):
-    # debugln "pmFree: exactly between prev and curr"
+    # logger.info "pmFree: exactly between prev and curr"
     # exactly between prev and curr
     prev.nframes += nframes + curr.nframes
     prev.next = curr.next
 
   else:
     # not adjacent to any other region
-    # debugln "pmFree: not adjacent to any other region"
+    # logger.info "pmFree: not adjacent to any other region"
     var newnode = paddr.toPMNodePtr
     newnode.nframes = nframes
     newnode.next = curr
@@ -243,18 +338,29 @@ proc pmFree*(paddr: PhysAddr, nframes: uint64) =
     else:
       head = newnode
 
+##########################################################################################
+# Debugging
+##########################################################################################
+
+iterator pmFreeRegions*(): tuple[paddr: PhysAddr, nframes: uint64] =
+  ## Iterate over all physical memory regions.
+  var node = head
+  while not node.isNil:
+    yield (node.toPhysAddr, node.nframes)
+    node = node.next
+
 proc printFreeRegions*() =
-  debug &"""   {"Start":>16}"""
-  debug &"""   {"Start (KB)":>12}"""
-  debug &"""   {"Size (KB)":>11}"""
-  debug &"""   {"#Pages":>9}"""
-  debugln ""
+  logger.raw &"""   {"Start":>16}"""
+  logger.raw &"""   {"Start (KB)":>12}"""
+  logger.raw &"""   {"Size (KB)":>11}"""
+  logger.raw &"""   {"#Pages":>9}"""
+  logger.raw "\n"
   var totalFreePages: uint64 = 0
   for (start, nframes) in pmFreeRegions():
-    debug &"   {cast[uint64](start):>#16x}"
-    debug &"   {cast[uint64](start) div 1024:>#12}"
-    debug &"   {nframes * 4:>#11}"
-    debug &"   {nframes:>#9}"
-    debugln ""
+    logger.raw &"   {cast[uint64](start):>#16x}"
+    logger.raw &"   {cast[uint64](start) div 1024:>#12}"
+    logger.raw &"   {nframes * 4:>#11}"
+    logger.raw &"   {nframes:>#9}"
+    logger.raw "\n"
     totalFreePages += nframes
-  debugln &"kernel: Total free: {totalFreePages * 4} KiB ({totalFreePages * 4 div 1024} MiB)"
+  logger.info &"total free: {totalFreePages * 4} KiB ({totalFreePages * 4 div 1024} MiB)"

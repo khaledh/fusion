@@ -38,15 +38,16 @@ proc iretq*() {.asmNoStackFrame.} =
   asm "iretq"
 
 proc createStack*(
-  vmRegions: var seq[VMRegion],
+  vmRegions: var seq[VMMappedRegion],
   pml4: ptr PML4Table,
   space: var VMAddressSpace,
   npages: uint64,
   mode: PageMode
 ): TaskStack =
+  logger.info &"creating stack of {npages} pages, mode={mode.uint64}"
   let stackRegion = vmalloc(space, npages)
-  vmmap(stackRegion, pml4, paReadWrite, mode, noExec = true)
-  vmRegions.add(stackRegion)
+  let stackMappedRegion = vmmap(stackRegion, pml4, paReadWrite, mode, noExec = true)
+  vmRegions.add(stackMappedRegion)
   result.data = cast[ptr UncheckedArray[uint64]](stackRegion.start)
   result.size = npages * PageSize
   result.bottom = cast[uint64](result.data) + result.size
@@ -77,23 +78,23 @@ proc createUserTask*(
   name: string = "",
   priority: TaskPriority = 0
 ): Task =
-
-  var vmRegions = newSeq[VMRegion]()
+  var vmRegions : seq[VMMappedRegion]
   var pml4 = cast[ptr PML4Table](new PML4Table)
 
   logger.info &"loading task from ELF image"
   let imagePtr = cast[pointer](p2v(imagePhysAddr))
   let loadedImage = load(imagePtr, pml4)
-  vmRegions.add(loadedImage.vmRegion)
+  # vmRegions.add(loadedImage.vmRegion)
+  vmRegions.add(loadedImage.vmMappedRegions)
   logger.info &"loaded task at: {loadedImage.vmRegion.start.uint64:#x}"
 
   # map kernel space
-  # logger.info &"mapping kernel space in task's page table"
+  logger.info &"mapping kernel space in task's page table"
   for i in 256 ..< 512:
     pml4.entries[i] = kpml4.entries[i]
 
   # create user and kernel stacks
-  # logger.info &"creating task stacks"
+  logger.info &"creating task user and kernel stacks"
   let ustack = createStack(vmRegions, pml4, uspace, 1, pmUser)
   let kstack = createStack(vmRegions, pml4, kspace, 1, pmSupervisor)
 
@@ -151,7 +152,7 @@ proc kernelTaskWrapper*(kproc: KernelProc) =
 
 proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPriority = 0): Task =
 
-  var vmRegions = newSeq[VMRegion]()
+  var vmRegions : seq[VMMappedRegion]
   var pml4 = getActivePML4()
 
   logger.info &"creating kernel task \"{name}\""
@@ -218,13 +219,19 @@ proc sleep*(durationMs: uint64) =
   sched.removeTask(task)
   sched.schedule()
 
+import pmm
 proc terminate*() =
   var task = sched.getCurrentTask()
   logger.info &"terminating task {task.id}"
   task.state = TaskState.Terminated
-  # vmfree(task.space, task.ustack.data, task.ustack.size div PageSize)
-  # vmfree(task.space, task.kstack.data, task.kstack.size div PageSize)
+
+  for vmRegion in task.vmRegions:
+    vmfree(uspace, vmRegion, task.pml4)
+
+  pmm.printFreeRegions()
+
   sched.removeTask(task)
+  task = nil
   sched.schedule()
 
 ###

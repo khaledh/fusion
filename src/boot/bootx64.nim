@@ -21,6 +21,9 @@ const
 
   PhysicalMemoryVirtualBase = 0xFFFF_8002_0000_0000'u64 # KernelVirtualBase + 8 GiB
 
+let
+  logger = DebugLogger(name: "boot")
+
 ####################################################################################################
 # Forward declarations
 ####################################################################################################
@@ -202,26 +205,26 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
     quit()
 
   # let numEntries = memoryMapSize div memoryMapDescriptorSize
-  # debugln &"UEFI Memory Map ({numEntries} entries):"
-  # debug &"""   {"Entry"}"""
-  # debug &"""   {"Type":22}"""
-  # debug &"""   {"Start":>12}"""
-  # debug &"""   {"Start (KB)":>15}"""
-  # debug &"""   {"#Pages":>10}"""
-  # debugln ""
+  # logger.info &"UEFI Memory Map ({numEntries} entries):"
+  # logger.raw &"""   {"Entry"}"""
+  # logger.raw &"""   {"Type":22}"""
+  # logger.raw &"""   {"Start":>12}"""
+  # logger.raw &"""   {"Start (KB)":>15}"""
+  # logger.raw &"""   {"#Pages":>10}"""
+  # logger.info ""
 
   # for i in 0 ..< numEntries:
   #   let entry = cast[ptr EfiMemoryDescriptor](cast[uint64](memoryMap) + i * memoryMapDescriptorSize)
-  #   debug &"   {i:>5}"
-  #   debug &"   {entry.type:22}"
-  #   debug &"   {entry.physicalStart:>#12x}"
-  #   debug &"   {entry.physicalStart div 1024:>#15}"
-  #   debug &"   {entry.numberOfPages:>#10}"
-  #   debugln ""
+  #   logger.raw &"   {i:>5}"
+  #   logger.raw &"   {entry.type:22}"
+  #   logger.raw &"   {entry.physicalStart:>#12x}"
+  #   logger.raw &"   {entry.physicalStart div 1024:>#15}"
+  #   logger.raw &"   {entry.numberOfPages:>#10}"
+  #   logger.info ""
 
   # ======= NO MORE UEFI BOOT SERVICES =======
 
-  # debugln ""
+  # logger.info ""
 
   let physMemoryMap = convertUefiMemoryMap(memoryMap, memoryMapSize, memoryMapDescriptorSize)
 
@@ -235,7 +238,7 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
 
   let virtMemoryMap = createVirtualMemoryMap(kernelImagePages, physMemoryPages)
 
-  debugln &"boot: Preparing BootInfo"
+  logger.info &"Preparing BootInfo"
   initBootInfo(
     bootInfoBase,
     physMemoryPages,
@@ -265,7 +268,7 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
   # jump to kernel
   let kernelStackTop = KernelStackVirtualBase + KernelStackSize
   let cr3 = cast[uint64](pml4)
-  debugln &"boot: Jumping to kernel at {cast[uint64](KernelVirtualBase):#010x}"
+  logger.info &"Jumping to kernel at {cast[uint64](KernelVirtualBase):#010x}"
   asm """
     mov rdi, %0  # bootInfo
     mov cr3, %2  # PML4
@@ -474,17 +477,17 @@ proc createPageTable(
   physMemoryPages: uint64,
 ): ptr PML4Table =
 
-  proc bootAlloc(nframes: uint64): PhysAddr =
+  proc bootAlloc(nframes: Positive): PhysAddr =
     result = cast[PhysAddr](new AlignedPage)
 
   # initialize vmm using identity-mapped physical memory
   vmInit(physMemoryVirtualBase = 0'u64, physAlloc = bootAlloc)
 
-  debugln &"boot: Creating new page tables"
+  logger.info &"Creating new page tables"
   var pml4 = cast[ptr PML4Table](bootAlloc(1))
 
   # identity-map bootloader image
-  debugln &"""boot:   {"Identity-mapping bootloader\:":<30} base={bootloaderBase:#010x}, pages={bootloaderPages}"""
+  logger.info &"""  {"Identity-mapping bootloader\:":<30} base={bootloaderBase:#010x}, pages={bootloaderPages}"""
   mapRegion(
     VMRegion(start: bootloaderBase.VirtAddr, npages: bootloaderPages),
     bootloaderBase.PhysAddr,
@@ -495,7 +498,7 @@ proc createPageTable(
   )
 
   # identity-map boot info
-  debugln &"""boot:   {"Identity-mapping BootInfo\:":<30} base={bootInfoBase:#010x}, pages={bootInfoPages}"""
+  logger.info &"""  {"Identity-mapping BootInfo\:":<30} base={bootInfoBase:#010x}, pages={bootInfoPages}"""
   mapRegion(
     VMRegion(start: bootInfoBase.VirtAddr, npages: bootInfoPages),
     bootInfoBase.PhysAddr,
@@ -506,7 +509,7 @@ proc createPageTable(
   )
 
   # map kernel to higher half
-  debugln &"""boot:   {"Mapping kernel to higher half\:":<30} base={KernelVirtualBase:#010x}, pages={kernelImagePages}"""
+  logger.info &"""  {"Mapping kernel to higher half\:":<30} base={KernelVirtualBase:#010x}, pages={kernelImagePages}"""
   mapRegion(
     VMRegion(start: KernelVirtualBase.VirtAddr, npages: kernelImagePages),
     kernelImageBase.PhysAddr,
@@ -517,7 +520,7 @@ proc createPageTable(
   )
 
   # map kernel stack
-  debugln &"""boot:   {"Mapping kernel stack\:":<30} base={KernelStackVirtualBase:#010x}, pages={kernelStackPages}"""
+  logger.info &"""  {"Mapping kernel stack\:":<30} base={KernelStackVirtualBase:#010x}, pages={kernelStackPages}"""
   mapRegion(
     VMRegion(start: KernelStackVirtualBase.VirtAddr, npages: kernelStackPages),
     kernelStackBase.PhysAddr,
@@ -528,7 +531,7 @@ proc createPageTable(
   )
 
   # map all physical memory; assume 128 MiB of physical memory
-  debugln &"""boot:   {"Mapping physical memory\:":<30} base={PhysicalMemoryVirtualBase:#010x}, pages={physMemoryPages}"""
+  logger.info &"""  {"Mapping physical memory\:":<30} base={PhysicalMemoryVirtualBase:#010x}, pages={physMemoryPages}"""
   mapRegion(
     VMRegion(start: PhysicalMemoryVirtualBase.VirtAddr, npages: physMemoryPages),
     0.PhysAddr,
@@ -556,12 +559,12 @@ proc checkStatus(status: EfiStatus) =
 
 proc unhandledException(e: ref Exception) =
   echo "boot: Unhandled exception: " & e.msg & " [" & $e.name & "]"
-  # debugln "boot: Unhandled exception: " & e.msg & " [" & $e.name & "]"
+  # logger.info "boot: Unhandled exception: " & e.msg & " [" & $e.name & "]"
   echo ""
-  # debugln ""
+  # logger.info ""
   if e.trace.len > 0:
     echo "boot: Stack trace:"
-    # debugln "boot: Stack trace:"
+    # logger.info "boot: Stack trace:"
     echo getStackTrace(e)
-    # debugln getStackTrace(e)
+    # logger.info getStackTrace(e)
   quit()

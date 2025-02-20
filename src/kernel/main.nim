@@ -41,6 +41,7 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   vmInit(
     physMemoryVirtualBase = bootInfo.physicalMemoryVirtualBase,
     physAlloc = pmm.pmAlloc,
+    physAlias = pmm.pmAlias,
     initialRegions = @[
       VMRegion(
         start: bootInfo.kernelImageVirtualBase.VirtAddr,
@@ -131,10 +132,10 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
 ####################################################################################################
 
 proc unhandledException*(e: ref Exception) =
-  logger.info ""
-  logger.info &"Unhandled exception: [{e.name}] {e.msg}"
+  debugln ""
+  debugln &"Unhandled exception: [{e.name}] {e.msg}"
   if e.trace.len > 0:
-    logger.info ""
-    logger.info "Stack trace:"
+    debugln ""
+    debugln "Stack trace:"
     debug getStackTrace(e)
   quit()
