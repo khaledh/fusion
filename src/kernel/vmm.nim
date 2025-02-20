@@ -274,6 +274,11 @@ proc mapRegion*(
       if pd[pdIndex].ignored3 < 512:
         inc pd[pdIndex].ignored3
 
+    # keep track of the number of mappings to this physical page
+    # TODO: what to do when there is more mappings than we can keep track of?
+    if pt[ptIndex].ignored3 < 0x7FF: # field is 11 bits wide
+      inc pt[ptIndex].ignored3
+
     inc virtAddr, PageSize
     inc physAddr, PageSize
 
@@ -321,30 +326,33 @@ proc unmapRegion*(region: VMRegion, pml4: ptr PML4Table) =
 
     # walk up the page tables and free the parent if all children are gone
 
-    # free the PT entry
-    ptEntry.present = 0
-    # pmFree(PhysAddr(ptEntry.physAddress shl 12), 1)
+    if ptEntry.ignored3 > 0:
+      dec ptEntry.ignored3
+      if ptEntry.ignored3 == 0:
+        # free the physical page if this is the last mapping
+        ptEntry.present = 0
+        pmFree(PhysAddr(ptEntry.physAddress shl 12), 1)
 
-    # if pdEntry.ignored3 > 0:
-    #   dec pdEntry.ignored3
-    #   if pdEntry.ignored3 == 0:
-    #     # free the PD entry
-    #     pdEntry.present = 0
-    #     pmFree(PhysAddr(pdEntry.physAddress shl 12), 1)
+        if pdEntry.ignored3 > 0:
+          dec pdEntry.ignored3
+          if pdEntry.ignored3 == 0:
+            # free the PD entry
+            pdEntry.present = 0
+            pmFree(PhysAddr(pdEntry.physAddress shl 12), 1)
 
-    #     if pdptEntry.ignored3 > 0:
-    #       dec pdptEntry.ignored3
-    #       if pdptEntry.ignored3 == 0:
-    #         # free the PDPT entry
-    #         pdptEntry.present = 0
-    #         pmFree(PhysAddr(pdptEntry.physAddress shl 12), 1)
+            if pdptEntry.ignored3 > 0:
+              dec pdptEntry.ignored3
+              if pdptEntry.ignored3 == 0:
+                # free the PDPT entry
+                pdptEntry.present = 0
+                pmFree(PhysAddr(pdptEntry.physAddress shl 12), 1)
 
-    #         if pml4Entry.ignored3 > 0:
-    #           dec pml4Entry.ignored3
-    #           if pml4Entry.ignored3 == 0:
-    #             # free the PML4 entry
-    #             pml4Entry.present = 0
-    #             pmFree(PhysAddr(pml4Entry.physAddress shl 12), 1)
+                if pml4Entry.ignored3 > 0:
+                  dec pml4Entry.ignored3
+                  if pml4Entry.ignored3 == 0:
+                    # free the PML4 entry
+                    pml4Entry.present = 0
+                    pmFree(PhysAddr(pml4Entry.physAddress shl 12), 1)
 
     inc virtAddr, PageSize
 
