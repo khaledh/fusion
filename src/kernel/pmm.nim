@@ -32,7 +32,6 @@ type
   
   PageFrame* = object
     ## A page frame in physical memory.
-    paddr*: PhysAddr
     rc*: uint16       # reference count
 
   InvalidRequest* = object of CatchableError
@@ -76,10 +75,17 @@ proc adjacent(node: ptr PMNode, paddr: PhysAddr): bool =
   )
 
 proc adjacent(paddr: PhysAddr, nframes: uint64, node: ptr PMNode): bool =
-  ## Check if the given physical address is adjacent to a node region.
+  ## Check if the given range of frames is adjacent to a node region.
   result = (
     not node.isNil and
     paddr +! nframes * FrameSize == node.toPhysAddr
+  )
+
+proc adjacent(paddr1: PhysAddr, nframes: uint64, paddr2: PhysAddr): bool =
+  ## Check if the given range of frames is adjacent to a physical address.
+  result = (
+    paddr1 +! nframes * FrameSize == paddr2 or
+    paddr2 +! nframes * FrameSize == paddr1
   )
 
 proc adjacent(region1, region2: PMRegion): bool =
@@ -109,47 +115,88 @@ proc pmInit*(physMemoryVirtualBase: uint64, memoryMap: MemoryMap) =
   ## Initialize the physical memory manager.
   physicalMemoryVirtualBase = physMemoryVirtualBase
 
+  var totalAvailablePages: uint64 = 0
+  var totalUsedPages: uint64 = 0
+  var totalReservedPages: uint64 = 0
   var prev: ptr PMNode
 
   for i in 0 ..< memoryMap.len:
     let entry = memoryMap.entries[i]
-    if entry.type == MemoryType.Free:
-      maxPhysAddr = endAddr(entry.start.PhysAddr, entry.nframes)
-      if not prev.isNil and adjacent(prev, entry.start.PhysAddr):
-        # merge contiguous regions
-        prev.nframes += entry.nframes
-      else:
-        # create a new node
-        var node: ptr PMNode = entry.start.PhysAddr.toPMNodePtr
-        node.nframes = entry.nframes
-        node.next = nil
 
-        if not prev.isNil:
-          prev.next = node
+    if entry.type == MemoryType.Reserved:
+      inc totalReservedPages, entry.nframes
+      let reservedRegion = PMRegion(start: entry.start.PhysAddr, nframes: entry.nframes)
+      reservedRegions.add(reservedRegion)
+      if maxPhysAddr.uint64 == reservedRegion.start.uint64:
+        maxPhysAddr = reservedRegion.endAddr
+    
+    else:
+      inc totalAvailablePages, entry.nframes
+
+      if entry.type == MemoryType.Free:
+        maxPhysAddr = endAddr(entry.start.PhysAddr, entry.nframes)
+        if not prev.isNil and adjacent(prev, entry.start.PhysAddr):
+          # merge contiguous regions
+          prev.nframes += entry.nframes
         else:
-          head = node
+          # create a new node
+          var node: ptr PMNode = entry.start.PhysAddr.toPMNodePtr
+          node.nframes = entry.nframes
+          node.next = nil
 
-        prev = node
+          if not prev.isNil:
+            prev.next = node
+          else:
+            head = node
 
-    elif entry.type == MemoryType.Reserved:
-      reservedRegions.add(PMRegion(start: entry.start.PhysAddr, nframes: entry.nframes))
-    
-    elif i > 0:
-      # check if there's a gap between the previous entry and the current entry
-      let prevEntry = memoryMap.entries[i - 1]
-      let gap = (
-        entry.start.PhysAddr - endAddr(prevEntry.start.PhysAddr, prevEntry.nframes)
-      )
-      if gap > 0:
-        reservedRegions.add(PMRegion(
-          start: endAddr(prevEntry.start.PhysAddr, prevEntry.nframes),
-          nframes: gap div FrameSize
-        ))
-    
+          prev = node
+
+      else:
+        inc totalUsedPages, entry.nframes
+        if i > 0:
+          # check if there's a gap between the previous entry and the current entry
+          let prevEntry = memoryMap.entries[i - 1]
+          let gap = (
+            entry.start.PhysAddr - endAddr(prevEntry.start.PhysAddr, prevEntry.nframes)
+          )
+          if gap > 0:
+            let reservedRegion = PMRegion(
+              start: endAddr(prevEntry.start.PhysAddr, prevEntry.nframes),
+              nframes: gap div FrameSize
+            )
+            reservedRegions.add(reservedRegion)
+            if maxPhysAddr.uint64 == reservedRegion.start.uint64:
+              maxPhysAddr = reservedRegion.endAddr
+
   # initialize pageFrames
   let totalPages = maxPhysAddr.uint64 div FrameSize
-  logger.info &"Total pages: {totalPages}"
-  logger.info &"pageFrames size: {totalPages * sizeof(PageFrame).uint64} bytes"
+  logger.info (
+    &"total physical memory: " &
+    # &"{maxPhysAddr.uint64 div 1024} KiB " &
+    &"{maxPhysAddr.uint64 div 1024 div 1024} MiB"
+  )
+  logger.info (
+    &"  ...available: " &
+    # &"{totalAvailablePages * 4} KiB " &
+    &"{totalAvailablePages * 4 div 1024} MiB"
+  )
+  # logger.info (
+  #   &"...      used: " &
+  #   # &"{totalUsedPages * 4} KiB " &
+  #   &"{totalUsedPages * 4 div 1024} MiB"
+  # )
+  # logger.info (
+  #   &"...  reserved: " &
+  #   # &"{totalReservedPages * 4} KiB " &
+  #   &"{((maxPhysAddr.uint64 div PageSize) - totalAvailablePages) * 4 div 1024} MiB"
+  # )
+  logger.info (
+    &"  ...free:      " &
+    # &"{(totalAvailablePages - totalUsedPages) * 4} KiB " &
+    &"{(totalAvailablePages - totalUsedPages) * 4 div 1024} MiB"
+  )
+  # logger.info &"total page frames: {totalPages}"
+  # logger.info &"pageFrames size: {totalPages * sizeof(PageFrame).uint64} bytes"
   pageFrames = newSeq[PageFrame](totalPages)
 
 ##########################################################################################
@@ -256,7 +303,6 @@ proc pmFree*(paddr: PhysAddr, nframes: uint64) =
 
   var pfnAddr = paddr
   var pfn = paddr.uint64 div FrameSize
-  logger.info &"freeing {nframes} frames at {paddr.uint64:#x}"
   for i in 0 ..< nframes:
     if pfn >= pageFrames.len.uint64:
       raise newException(InvalidRequest, &"Physical address {paddr.uint64:#x} is out of range")
@@ -275,6 +321,7 @@ proc pmFree*(paddr: PhysAddr, nframes: uint64) =
 
   for region in regions:
     if region.nframes > 0:
+#      logger.info &"freeing {region.nframes} frames at {region.start.uint64:#x}"
       pmFreeRegion(region.start, region.nframes)
 
 proc pmFreeRegion(paddr: PhysAddr, nframes: Positive) =
@@ -349,7 +396,7 @@ iterator pmFreeRegions*(): tuple[paddr: PhysAddr, nframes: uint64] =
     yield (node.toPhysAddr, node.nframes)
     node = node.next
 
-proc printFreeRegions*() =
+proc printMemoryRegions*() =
   logger.raw &"""   {"Start":>16}"""
   logger.raw &"""   {"Start (KB)":>12}"""
   logger.raw &"""   {"Size (KB)":>11}"""
@@ -363,4 +410,13 @@ proc printFreeRegions*() =
     logger.raw &"   {nframes:>#9}"
     logger.raw "\n"
     totalFreePages += nframes
+
+  # logger.raw "reserved regions\n"
+  # for region in reservedRegions:
+  #   logger.raw &"   {cast[uint64](region.start):>#16x}"
+  #   logger.raw &"   {cast[uint64](region.start) div 1024:>#12}"
+  #   logger.raw &"   {region.nframes * 4:>#11}"
+  #   logger.raw &"   {region.nframes:>#9}"
+  #   logger.raw "\n"
+
   logger.info &"total free: {totalFreePages * 4} KiB ({totalFreePages * 4 div 1024} MiB)"

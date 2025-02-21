@@ -23,6 +23,7 @@
   - `unmapRegion`: Unmap a range of pages in the given page table structure.
   - `vmalloc`: Allocate a range of virtual memory pages in the given address space.
   - `vmmap`: Map a range of pages in the given address space.
+  - `vmfree`: Unmap a range of pages in the given address space.
 ]#
 
 import std/[algorithm, tables]
@@ -235,10 +236,10 @@ proc mapRegion*(
   var vaddr = region.start
   var paddr = physAddr
 
-  logger.info (
-    &"mapping {region.npages} pages at {vaddr.uint64:#x} to {paddr.uint64:#x}, " &
-    &"write={access}, user={mode}, xd={noExec}, alias={alias}"
-  )
+  # logger.info (
+  #   &"mapping {region.npages} pages at {vaddr.uint64:#x} to {paddr.uint64:#x}, " &
+  #   &"write={access}, user={mode}, xd={noExec}, alias={alias}"
+  # )
 
   var pml4Index, pdptIndex, pdIndex, ptIndex: uint64
   var pdpt: ptr PDPTable
@@ -312,7 +313,7 @@ proc mapRegion*(
 proc unmapRegion*(region: VMRegion, pml4: ptr PML4Table) =
   var virtAddr = region.start
 
-  logger.info &"unmapping {region.npages} pages at {virtAddr.uint64:#x}"
+  # logger.info &"unmapping {region.npages} pages at {virtAddr.uint64:#x}"
 
   var pml4Index, pdptIndex, pdIndex, ptIndex: uint64
 

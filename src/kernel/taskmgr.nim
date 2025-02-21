@@ -228,7 +228,7 @@ proc terminate*() =
   for vmRegion in task.vmRegions:
     vmfree(uspace, vmRegion, task.pml4)
 
-  pmm.printFreeRegions()
+  # pmm.printMemoryRegions()
 
   sched.removeTask(task)
   task = nil
