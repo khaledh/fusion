@@ -44,7 +44,7 @@ proc createStack*(
   npages: uint64,
   mode: PageMode
 ): TaskStack =
-  logger.info &"creating stack of {npages} pages, mode={mode.uint64}"
+  # logger.info &"creating stack of {npages} pages, mode={mode.uint64}"
   let stackRegion = vmalloc(space, npages)
   let stackMappedRegion = vmmap(stackRegion, pml4, paReadWrite, mode, noExec = true)
   vmRegions.add(stackMappedRegion)
@@ -89,12 +89,12 @@ proc createUserTask*(
   logger.info &"loaded task at: {loadedImage.vmRegion.start.uint64:#x}"
 
   # map kernel space
-  logger.info &"mapping kernel space in task's page table"
+  # logger.info &"mapping kernel space in task's page table"
   for i in 256 ..< 512:
     pml4.entries[i] = kpml4.entries[i]
 
   # create user and kernel stacks
-  logger.info &"creating task user and kernel stacks"
+  # logger.info &"creating task user and kernel stacks"
   let ustack = createStack(vmRegions, pml4, uspace, 1, pmUser)
   let kstack = createStack(vmRegions, pml4, kspace, 1, pmSupervisor)
 

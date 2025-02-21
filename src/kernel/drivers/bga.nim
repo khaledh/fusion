@@ -64,7 +64,7 @@ proc pciInit*(dev: PciDeviceConfig) =
   fbPhysAddr = dev.bar[0]
 
   logger.info &"  ...id = {bgaId:0>4x}"
-  logger.info &"  ...framebuffer physical address = {fbPhysAddr:0>16x}"
+  logger.info &"  ...framebuffer physical address = {fbPhysAddr:>#016x}"
 
 proc getFramebuffer*(): ptr UncheckedArray[uint32] =
   cast[ptr UncheckedArray[uint32]](fbVirtAddr)
