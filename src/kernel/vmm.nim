@@ -116,6 +116,16 @@ proc vmInit*(
   )
   kpml4 = getActivePML4()
 
+  logger.info (
+    &"  ...  user space: {uspace.minAddr.uint64:#018x} - {uspace.maxAddr.uint64:#018x}"
+  )
+  logger.info (
+    &"  ...kernel space: {kspace.minAddr.uint64:#018x} - {kspace.maxAddr.uint64:#018x}"
+  )
+  logger.info (
+    &"  ...physical mem: {physicalMemoryVirtualBase:#018x}"
+  )
+
 ##########################################################################################
 # Active PML4 utilities
 ##########################################################################################

@@ -23,8 +23,11 @@ proc cmpSleepUntil(a, b: Task): bool {.inline.} =
 var
   tasks = newSeq[Task]()
   sleepers = initHeapQueue[Task](cmp = cmpSleepUntil)
-  nextTaskId: uint64 = 0
 
+proc newTaskId*(): uint64 {.inline.} =
+  var nextTaskId {.global.}: uint64 = 0
+  result = nextTaskId
+  inc nextTaskId
 
 proc wakeupTasks*()
 
@@ -46,13 +49,15 @@ proc createStack*(
 ): TaskStack =
   # logger.info &"creating stack of {npages} pages, mode={mode.uint64}"
   let stackRegion = vmalloc(space, npages)
-  let stackMappedRegion = vmmap(stackRegion, pml4, paReadWrite, mode, noExec = true)
+  let stackMappedRegion = vmmap(
+    stackRegion, pml4, paReadWrite, mode, noExec = true
+  )
   vmRegions.add(stackMappedRegion)
   result.data = cast[ptr UncheckedArray[uint64]](stackRegion.start)
   result.size = npages * PageSize
   result.bottom = cast[uint64](result.data) + result.size
 
-# task initial stack frame
+# task initial kernel stack frame
 #
 # stack
 # bottom --> +-------------------+
@@ -62,7 +67,7 @@ proc createStack*(
 #            | cs                |
 #            | rip               |
 #            +-------------------+
-#            | iretq proc ptr    | <-- `ret` instruction will pop this into `rip`, which
+#            | `iretq` proc ptr  | <-- `ret` instruction will pop this into `rip`, which
 #            +-------------------+     will execute `iretq`
 #            | rax               |
 #            | ...               |
@@ -84,7 +89,6 @@ proc createUserTask*(
   logger.info &"loading task from ELF image"
   let imagePtr = cast[pointer](p2v(imagePhysAddr))
   let loadedImage = load(imagePtr, pml4)
-  # vmRegions.add(loadedImage.vmRegion)
   vmRegions.add(loadedImage.vmMappedRegions)
   logger.info &"loaded task at: {loadedImage.vmRegion.start.uint64:#x}"
 
@@ -118,10 +122,8 @@ proc createUserTask*(
   let regsAddr = iretqPtrAddr - sizeof(TaskRegs).uint64
   var regs = cast[ptr TaskRegs](regsAddr)
   zeroMem(regs, sizeof(TaskRegs))
-  regs.rdi = 5050
 
-  let taskId = nextTaskId
-  inc nextTaskId
+  let taskId = newTaskId()
 
   result = Task(
     id: taskId,
@@ -135,7 +137,6 @@ proc createUserTask*(
     state: TaskState.New,
     isUser: true,
   )
-
   tasks.add(result)
 
   logger.info &"created user task {taskId}"
@@ -150,8 +151,11 @@ proc kernelTaskWrapper*(kproc: KernelProc) =
   kproc()
   terminate()
 
-proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPriority = 0): Task =
-
+proc createKernelTask*(
+  kproc: KernelProc,
+  name: string = "",
+  priority: TaskPriority = 0,
+): Task =
   var vmRegions : seq[VMMappedRegion]
   var pml4 = getActivePML4()
 
@@ -180,8 +184,7 @@ proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPrior
   zeroMem(regs, sizeof(TaskRegs))
   regs.rdi = cast[uint64](kproc)  # pass kproc as an argument to kernelTaskWrapper
 
-  let taskId = nextTaskId
-  inc nextTaskId
+  let taskId = newTaskId()
 
   result = Task(
     id: taskId,
@@ -208,7 +211,6 @@ proc suspend*() =
   task.state = TaskState.Suspended
   sched.removeTask(task)
   sched.schedule()
-  logger.info &"resumed task {task.id}"
 
 proc sleep*(durationMs: uint64) =
   var task = sched.getCurrentTask()
@@ -219,7 +221,6 @@ proc sleep*(durationMs: uint64) =
   sched.removeTask(task)
   sched.schedule()
 
-import pmm
 proc terminate*() =
   var task = sched.getCurrentTask()
   logger.info &"terminating task {task.id}"
@@ -227,8 +228,6 @@ proc terminate*() =
 
   for vmRegion in task.vmRegions:
     vmfree(uspace, vmRegion, task.pml4)
-
-  # pmm.printMemoryRegions()
 
   sched.removeTask(task)
   task = nil

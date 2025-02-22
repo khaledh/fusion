@@ -171,7 +171,7 @@ proc pmInit*(physMemoryVirtualBase: uint64, memoryMap: MemoryMap) =
   # initialize pageFrames
   let totalPages = maxPhysAddr.uint64 div FrameSize
   logger.info (
-    &"total physical memory: " &
+    &"  ...total mem: " &
     # &"{maxPhysAddr.uint64 div 1024} KiB " &
     &"{maxPhysAddr.uint64 div 1024 div 1024} MiB"
   )
