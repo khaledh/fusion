@@ -65,7 +65,7 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   let lapicFrameAddr = lapicPhysAddr - (lapicPhysAddr mod PageSize)
   # map LAPIC frame into virtual memory
   let lapicVMRegion = vmalloc(kspace, 1)
-  mapRegion(
+  vmMapRegion(
     region = VMRegion(start: lapicVMRegion.start, npages: 1),
     physAddr = lapicFrameAddr.PhysAddr,
     pml4 = getActivePML4(),

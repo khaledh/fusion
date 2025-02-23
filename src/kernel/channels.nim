@@ -76,7 +76,7 @@ proc newChannel*(msgSize: int, msgCapacity: int = DefaultMessageCapacity): Chann
   let buffSize = msgSize * msgCapacity
   let numPages = (buffSize + PageSize - 1) div PageSize
   let buffRegion = vmalloc(uspace, numPages.uint64)
-  mapRegion(
+  vmMapRegion(
     region = VMRegion(start: buffRegion.start, npages: numPages.uint64),
     pml4 = getActivePML4(),
     pageAccess = paReadWrite,
@@ -111,7 +111,7 @@ proc open*(chid: int, task: Task, mode: ChannelMode): int =
 
   let buffStartVirt = cast[VirtAddr](buffStart)
   let buffStartPhys = v2p(buffStartVirt, kpml4).get
-  mapRegion(
+  vmMapRegion(
     region = VMRegion(start: buffStartVirt, npages: numPages.uint64),
     physAddr = buffStartPhys,
     pml4 = task.pml4,
@@ -130,7 +130,7 @@ proc close*(chid: int, task: Task): int =
   var ch = channels[chid]
   let buffStart = ch.buffer.data
   let numPages = (ch.buffer.cap + PageSize - 1) div PageSize
-  unmapRegion(
+  vmUnmapRegion(
     region = VMRegion(start: cast[VirtAddr](buffStart), npages: numPages.uint64),
     pml4 = task.pml4,
   )

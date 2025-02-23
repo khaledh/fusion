@@ -1,5 +1,5 @@
 #[
-  Virtual memory manager (VMM)
+  Virtual Memory Manager (VMM)
 
   - The virtual memory manager manages the mapping between virtual and physical memory.
   - Fusion is a single address space kernel. Unlike traditional kernels, it does not have
@@ -12,24 +12,15 @@
     occupies a disjoint region of the user address space that is protected from other
     tasks. However, tasks can communicate by getting access to shared memory regions
     (usually via the channels IPC).
-
-  API
-  - `vmInit`: Initialize the virtual memory manager.
-  - `getActivePML4`: Returns the currently active page table.
-  - `setActivePML4`: Changes the active page table to the given one.
-  - `p2v`: Convert a physical address to a virtual address.
-  - `v2p`: Convert a virtual address to a physical address.
-  - `mapRegion`: Map a range of pages in the given page table structure.
-  - `unmapRegion`: Unmap a range of pages in the given page table structure.
-  - `vmalloc`: Allocate a range of virtual memory pages in the given address space.
-  - `vmmap`: Map a range of pages in the given address space.
-  - `vmfree`: Unmap a range of pages in the given address space.
 ]#
-
 import std/[algorithm, tables]
 
 import common/pagetables
 import pmm
+
+##########################################################################################
+# Interface
+##########################################################################################
 
 type
   VMAddressSpace* = object
@@ -70,6 +61,54 @@ type
     ## A proc that aliases a physical memory region (for shared memory).
 
   OutOfMemoryError* = object of CatchableError
+    ## Raised when there is not enough virtual memory to allocate a new region in a
+    ## specific address space.
+
+proc vmInit*(
+  physMemoryVirtualBase: uint64,
+  physAlloc: PhysAlloc,
+  physAlias: PhysAlias = nil,
+  initialRegions: seq[VMRegion] = @[],
+) ## Initialize the virtual memory manager.
+
+proc setActivePML4*(pml4: ptr PML4Table)
+  ## Changes the active page table to the given one.
+
+proc vmMapRegion*(
+  region: VMRegion,
+  pml4: ptr PML4Table,
+  pageAccess: PageAccess,
+  pageMode: PageMode,
+  noExec: bool = false,
+): VMMappedRegion {.discardable.} 
+  ## Map a range of pages in the given page table structure. The physical memory is
+  ## allocated automatically.
+
+proc vmMapRegion*(
+  region: VMRegion,
+  physAddr: PhysAddr,
+  pml4: ptr PML4Table,
+  pageAccess: PageAccess,
+  pageMode: PageMode,
+  noExec: bool = false,
+  alias: bool = true,
+): VMMappedRegion {.discardable.} 
+  ## Map a range of pages in the given page table structure. The physical memory must be
+  ## allocated before calling this function.
+
+proc vmUnmapRegion*(region: VMRegion, pml4: ptr PML4Table)
+  ## Unmap a range of pages in the given page table structure.
+
+proc vmalloc*(space: var VMAddressSpace, pageCount: uint64): VMRegion
+  ## Allocate a range of virtual memory pages in the given address space.
+
+proc vmFreeRegion*(space: var VMAddressSpace, region: VMMappedRegion, pml4: ptr PML4Table)
+  ## Unmap a VM region in the given page table structure.
+
+
+##########################################################################################
+# Implementation
+##########################################################################################
 
 const
   KernelSpaceMinAddr* = 0xffff800000000000'u64.VirtAddr
@@ -93,7 +132,6 @@ template `end`*(region: VMRegion): VirtAddr =
   region.start +! region.npages * PageSize
 
 proc getActivePML4*(): ptr PML4Table
-
 proc vmInit*(
   physMemoryVirtualBase: uint64,
   physAlloc: PhysAlloc,
@@ -116,15 +154,11 @@ proc vmInit*(
   )
   kpml4 = getActivePML4()
 
-  logger.info (
-    &"  ...  user space: {uspace.minAddr.uint64:#018x} - {uspace.maxAddr.uint64:#018x}"
-  )
-  logger.info (
-    &"  ...kernel space: {kspace.minAddr.uint64:#018x} - {kspace.maxAddr.uint64:#018x}"
-  )
-  logger.info (
-    &"  ...physical mem: {physicalMemoryVirtualBase:#018x}"
-  )
+  let (uspaceMin, uspaceMax) = (uspace.minAddr.uint64, uspace.maxAddr.uint64)
+  let (kspaceMin, kspaceMax) = (kspace.minAddr.uint64, kspace.maxAddr.uint64)
+  logger.info &"    user space: {uspaceMin:#018x} - {uspaceMax:#018x}"
+  logger.info &"  kernel space: {kspaceMin:#018x} - {kspaceMax:#018x}"
+  logger.info &"  physical mem: {physicalMemoryVirtualBase:#018x}"
 
 ##########################################################################################
 # Active PML4 utilities
@@ -227,7 +261,7 @@ proc getOrCreateEntry[P, C](
 
   result.p = cast[ptr C](p2v(physAddr))
 
-proc mapRegion*(
+proc vmMapRegion*(
   region: VMRegion,
   physAddr: PhysAddr,
   pml4: ptr PML4Table,
@@ -235,20 +269,20 @@ proc mapRegion*(
   pageMode: PageMode,
   noExec: bool = false,
   alias: bool = true,
-) =
+): VMMappedRegion {.discardable.} =
   ## Map a range of pages in the given page table structure. The physical memory must be
   ## allocated before calling this function.
   let
     access = cast[uint64](pageAccess)
     mode = cast[uint64](pageMode)
-    noExec = cast[uint64](noExec)
+    xd = cast[uint64](noExec)
 
   var vaddr = region.start
   var paddr = physAddr
 
   # logger.info (
   #   &"mapping {region.npages} pages at {vaddr.uint64:#x} to {paddr.uint64:#x}, " &
-  #   &"write={access}, user={mode}, xd={noExec}, alias={alias}"
+  #   &"write={access}, user={mode}, xd={xd}, alias={alias}"
   # )
 
   var pml4Index, pdptIndex, pdIndex, ptIndex: uint64
@@ -291,7 +325,7 @@ proc mapRegion*(
     pt[ptIndex].present = 1
     pt[ptIndex].write = access
     pt[ptIndex].user = mode
-    pt[ptIndex].xd = noExec
+    pt[ptIndex].xd = xd
     if created:
       # use the ignored bits of the parent to keep track of child entries count
       if pd[pdIndex].ignored3 < 512:
@@ -308,19 +342,34 @@ proc mapRegion*(
   if alias and not pmalias.isNil:
     pmalias(physAddr, region.npages)
 
-proc mapRegion*(
+  # map the flags and return the mapped region
+  var flags = { VMMappedRegionFlag.Read }
+  if pageAccess == paReadWrite:
+    flags.incl(VMMappedRegionFlag.Write)
+  if not noExec:
+    flags.incl(VMMappedRegionFlag.Execute)
+
+  result = VMMappedRegion(
+    start: region.start,
+    npages: region.npages,
+    paddr: physAddr,
+    flags: flags,
+    pml4: pml4,
+  )
+
+proc vmMapRegion*(
   region: VMRegion,
   pml4: ptr PML4Table,
   pageAccess: PageAccess,
   pageMode: PageMode,
   noExec: bool = false,
-) =
+): VMMappedRegion {.discardable.} =
   ## Map a range of pages in the given page table structure. The physical memory is
   ## allocated automatically.
   let physAddr = pmalloc(region.npages)
-  mapRegion(region, physAddr, pml4, pageAccess, pageMode, noExec, alias = false)
+  result = vmMapRegion(region, physAddr, pml4, pageAccess, pageMode, noExec, alias = false)
 
-proc unmapRegion*(region: VMRegion, pml4: ptr PML4Table) =
+proc vmUnmapRegion*(region: VMRegion, pml4: ptr PML4Table) =
   var virtAddr = region.start
 
   # logger.info &"unmapping {region.npages} pages at {virtAddr.uint64:#x}"
@@ -404,48 +453,52 @@ proc vmalloc*(space: var VMAddressSpace, pageCount: uint64): VMRegion =
   space.regions.add(result)
   space.regions = space.regions.sortedByIt(it.start)
 
-proc vmmap*(
-  region: VMRegion,
-  physAddr: PhysAddr,
-  pml4: ptr PML4Table,
-  pageAccess: PageAccess,
-  pageMode: PageMode,
-  noExec: bool = false,
-  alias: bool = true,
-): VMMappedRegion {.discardable.} =
-  ## Map a VM region at a specific physical address in the given page table structure.
+# proc vmmap*(
+#   region: VMRegion,
+#   physAddr: PhysAddr,
+#   pml4: ptr PML4Table,
+#   pageAccess: PageAccess,
+#   pageMode: PageMode,
+#   noExec: bool = false,
+#   alias: bool = true,
+# ): VMMappedRegion {.discardable.} =
+#   ## Map a VM region at a specific physical address in the given page table structure.
 
-  # allocate physical memory and map the region
-  mapRegion(region, physAddr, pml4, pageAccess, pageMode, noExec, alias = alias)
+#   # allocate physical memory and map the region
+#   vmMapRegion(region, physAddr, pml4, pageAccess, pageMode, noExec, alias = alias)
 
-  # map the flags and return the mapped region
-  var flags = { VMMappedRegionFlag.Read }
-  if pageAccess == paReadWrite:
-    flags.incl(VMMappedRegionFlag.Write)
-  if not noExec:
-    flags.incl(VMMappedRegionFlag.Execute)
+#   # map the flags and return the mapped region
+#   var flags = { VMMappedRegionFlag.Read }
+#   if pageAccess == paReadWrite:
+#     flags.incl(VMMappedRegionFlag.Write)
+#   if not noExec:
+#     flags.incl(VMMappedRegionFlag.Execute)
 
-  result = VMMappedRegion(
-    start: region.start,
-    npages: region.npages,
-    paddr: physAddr,
-    flags: flags,
-    pml4: pml4,
-  )
+#   result = VMMappedRegion(
+#     start: region.start,
+#     npages: region.npages,
+#     paddr: physAddr,
+#     flags: flags,
+#     pml4: pml4,
+#   )
 
-proc vmmap*(
-  region: VMRegion,
-  pml4: ptr PML4Table,
-  pageAccess: PageAccess,
-  pageMode: PageMode,
-  noExec: bool = false,
-): VMMappedRegion {.discardable.} =
-  ## Map a VM region in the given page table structure. Allocates physical memory
-  ## automatically.
-  let paddr = pmalloc(region.npages)
-  result = vmmap(region, paddr, pml4, pageAccess, pageMode, noExec, alias = false)
+# proc vmmap*(
+#   region: VMRegion,
+#   pml4: ptr PML4Table,
+#   pageAccess: PageAccess,
+#   pageMode: PageMode,
+#   noExec: bool = false,
+# ): VMMappedRegion {.discardable.} =
+#   ## Map a VM region in the given page table structure. Allocates physical memory
+#   ## automatically.
+#   let paddr = pmalloc(region.npages)
+#   result = vmmap(region, paddr, pml4, pageAccess, pageMode, noExec, alias = false)
 
-proc vmfree*(space: var VMAddressSpace, region: VMMappedRegion, pml4: ptr PML4Table) =
+proc vmFreeRegion*(
+  space: var VMAddressSpace,
+  region: VMMappedRegion,
+  pml4: ptr PML4Table
+) =
   ## Unmap a VM region in the given page table structure.
   # logger.info &"freeing {region.npages} pages at {region.start.uint64:#x}"
   
@@ -456,7 +509,7 @@ proc vmfree*(space: var VMAddressSpace, region: VMMappedRegion, pml4: ptr PML4Ta
       break
 
   # unmap the region and free the physical memory
-  unmapRegion(VMRegion(start: region.start, npages: region.npages), pml4)
+  vmUnmapRegion(VMRegion(start: region.start, npages: region.npages), pml4)
   pmFree(region.paddr, region.npages)
 
 ##########################################################################################

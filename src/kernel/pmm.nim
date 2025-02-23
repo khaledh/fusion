@@ -1,20 +1,30 @@
 #[
-  Physical memory manager (PMM)
+  Physical Memory Manager (PMM)
 
-  - The physical memory manager uses a free list to keep track of free regions of physical memory.
+  - The PMM uses a free list to keep track of free regions.
   - Reserved physical memory regions are excluded from the free list.
-  - The free list is a singly linked list of PMNode objects, sorted by the address of the regions.
-  - Each PMNode object represents a contiguous region of free physical memory, and is stored at the
-    beginning of the region.
+  - The free list is a singly linked list of PMNode objects, sorted by the address of the
+    region.
+  - Each PMNode object represents a contiguous region of free physical memory, and is
+    stored at the beginning of the region.
   - Free regions are split and merged as needed.
-
-  API
-  - `pmInit`: Initialize the physical memory manager.
-  - `pmAlloc`: Allocate a contiguous region of physical memory.
-  - `pmFree`: Free a contiguous region of physical memory.
 ]#
-
 import common/bootinfo
+
+##########################################################################################
+# Interface
+###########################################################################################
+
+proc pmInit*(physMemoryVirtualBase: uint64, memoryMap: MemoryMap)
+  ## Initialize the physical memory manager.
+proc pmAlloc*(nframes: Positive): PhysAddr
+  ## Allocate a contiguous region of physical memory.
+proc pmAlias*(paddr: PhysAddr, nframes: Positive)
+  ## Increment the reference count of a region of physical memory. The region must be
+  ## already allocated.
+proc pmFree*(paddr: PhysAddr, nframes: Positive)
+  ## Free a contiguous region of physical memory.
+
 
 const
   FrameSize = 4096
@@ -25,12 +35,12 @@ type
     nframes: uint64
     next: ptr PMNode
 
-  PMRegion* = object
+  PMRegion = object
     ## A region of physical memory.
     start*: PhysAddr
     nframes*: uint64
-  
-  PageFrame* = object
+
+  PageFrame = object
     ## A page frame in physical memory.
     rc*: uint16       # reference count
 
@@ -112,7 +122,6 @@ proc overlaps(region1, region2: PMRegion): bool =
 ##########################################################################################
 
 proc pmInit*(physMemoryVirtualBase: uint64, memoryMap: MemoryMap) =
-  ## Initialize the physical memory manager.
   physicalMemoryVirtualBase = physMemoryVirtualBase
 
   var totalAvailablePages: uint64 = 0
@@ -170,34 +179,12 @@ proc pmInit*(physMemoryVirtualBase: uint64, memoryMap: MemoryMap) =
 
   # initialize pageFrames
   let totalPages = maxPhysAddr.uint64 div FrameSize
-  logger.info (
-    &"  ...total mem: " &
-    # &"{maxPhysAddr.uint64 div 1024} KiB " &
-    &"{maxPhysAddr.uint64 div 1024 div 1024} MiB"
-  )
-  logger.info (
-    &"  ...available: " &
-    # &"{totalAvailablePages * 4} KiB " &
-    &"{totalAvailablePages * 4 div 1024} MiB"
-  )
-  # logger.info (
-  #   &"...      used: " &
-  #   # &"{totalUsedPages * 4} KiB " &
-  #   &"{totalUsedPages * 4 div 1024} MiB"
-  # )
-  # logger.info (
-  #   &"...  reserved: " &
-  #   # &"{totalReservedPages * 4} KiB " &
-  #   &"{((maxPhysAddr.uint64 div PageSize) - totalAvailablePages) * 4 div 1024} MiB"
-  # )
-  logger.info (
-    &"  ...free:      " &
-    # &"{(totalAvailablePages - totalUsedPages) * 4} KiB " &
-    &"{(totalAvailablePages - totalUsedPages) * 4 div 1024} MiB"
-  )
-  # logger.info &"total page frames: {totalPages}"
-  # logger.info &"pageFrames size: {totalPages * sizeof(PageFrame).uint64} bytes"
   pageFrames = newSeq[PageFrame](totalPages)
+
+  let totalFreePages = totalAvailablePages - totalUsedPages
+  logger.info &"  total mem: {maxPhysAddr.uint64 div 1024 div 1024} MiB"
+  logger.info &"  available: {totalAvailablePages * 4 div 1024} MiB"
+  logger.info &"       free: {totalFreePages * 4 div 1024} MiB"
 
 ##########################################################################################
 # Alloc / Alias
@@ -273,8 +260,10 @@ proc pmAlias*(paddr: PhysAddr, nframes: Positive) =
 ##########################################################################################
 
 proc pmFreeRegion(paddr: PhysAddr, nframes: Positive)
-proc pmFree*(paddr: PhysAddr, nframes: uint64) =
+proc pmFree*(paddr: PhysAddr, nframes: Positive) =
   ## Free a contiguous region of physical memory.
+  let nframes = nframes.uint64
+
   if paddr.uint64 mod FrameSize != 0:
     raise newException(InvalidRequest, &"Unaligned physical address: {paddr.uint64:#x}")
 
@@ -389,7 +378,7 @@ proc pmFreeRegion(paddr: PhysAddr, nframes: Positive) =
 # Debugging
 ##########################################################################################
 
-iterator pmFreeRegions*(): tuple[paddr: PhysAddr, nframes: uint64] =
+iterator iterFreeRegions(): tuple[paddr: PhysAddr, nframes: uint64] =
   ## Iterate over all physical memory regions.
   var node = head
   while not node.isNil:
@@ -403,7 +392,7 @@ proc printMemoryRegions*() =
   logger.raw &"""   {"#Pages":>9}"""
   logger.raw "\n"
   var totalFreePages: uint64 = 0
-  for (start, nframes) in pmFreeRegions():
+  for (start, nframes) in iterFreeRegions():
     logger.raw &"   {cast[uint64](start):>#16x}"
     logger.raw &"   {cast[uint64](start) div 1024:>#12}"
     logger.raw &"   {nframes * 4:>#11}"

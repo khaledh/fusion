@@ -82,11 +82,11 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
     let region = VMRegion(start: seg.vaddr, npages: seg.npages)
     let access = if Writable in seg.flags: paReadWrite else: paRead
     let noExec = Executable notin seg.flags
-    let mappedRegion = vmmap(region, pml4, access, pmUser, noExec)
+    let mappedRegion = vmMapRegion(region, pml4, access, pmUser, noExec)
     taskMappedRegions.add(mappedRegion)
     # temporarily map the region in kernel space so that we can copy the segments and
     # apply relocations
-    vmmap(
+    vmMapRegion(
       region = VMRegion(start: seg.vaddr, npages: seg.npages),
       physAddr = mappedRegion.paddr,
       pml4 = kpml4,
@@ -97,7 +97,7 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
   defer:
     # unmap the user image from kernel space on exit
     for mappedRegion in taskMappedRegions:
-      vmfree(
+      vmFreeRegion(
         space = kspace,
         region = mappedRegion,
         pml4 = kpml4,

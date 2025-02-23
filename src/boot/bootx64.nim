@@ -488,7 +488,7 @@ proc createPageTable(
 
   # identity-map bootloader image
   logger.info &"""  {"Identity-mapping bootloader\:":<30} base={bootloaderBase:#010x}, pages={bootloaderPages}"""
-  mapRegion(
+  vmMapRegion(
     VMRegion(start: bootloaderBase.VirtAddr, npages: bootloaderPages),
     bootloaderBase.PhysAddr,
     pml4,
@@ -499,7 +499,7 @@ proc createPageTable(
 
   # identity-map boot info
   logger.info &"""  {"Identity-mapping BootInfo\:":<30} base={bootInfoBase:#010x}, pages={bootInfoPages}"""
-  mapRegion(
+  vmMapRegion(
     VMRegion(start: bootInfoBase.VirtAddr, npages: bootInfoPages),
     bootInfoBase.PhysAddr,
     pml4,
@@ -510,7 +510,7 @@ proc createPageTable(
 
   # map kernel to higher half
   logger.info &"""  {"Mapping kernel to higher half\:":<30} base={KernelVirtualBase:#010x}, pages={kernelImagePages}"""
-  mapRegion(
+  vmMapRegion(
     VMRegion(start: KernelVirtualBase.VirtAddr, npages: kernelImagePages),
     kernelImageBase.PhysAddr,
     pml4,
@@ -521,7 +521,7 @@ proc createPageTable(
 
   # map kernel stack
   logger.info &"""  {"Mapping kernel stack\:":<30} base={KernelStackVirtualBase:#010x}, pages={kernelStackPages}"""
-  mapRegion(
+  vmMapRegion(
     VMRegion(start: KernelStackVirtualBase.VirtAddr, npages: kernelStackPages),
     kernelStackBase.PhysAddr,
     pml4,
@@ -532,7 +532,7 @@ proc createPageTable(
 
   # map all physical memory; assume 128 MiB of physical memory
   logger.info &"""  {"Mapping physical memory\:":<30} base={PhysicalMemoryVirtualBase:#010x}, pages={physMemoryPages}"""
-  mapRegion(
+  vmMapRegion(
     VMRegion(start: PhysicalMemoryVirtualBase.VirtAddr, npages: physMemoryPages),
     0.PhysAddr,
     pml4,

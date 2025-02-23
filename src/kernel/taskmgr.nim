@@ -49,7 +49,7 @@ proc createStack*(
 ): TaskStack =
   # logger.info &"creating stack of {npages} pages, mode={mode.uint64}"
   let stackRegion = vmalloc(space, npages)
-  let stackMappedRegion = vmmap(
+  let stackMappedRegion = vmMapRegion(
     stackRegion, pml4, paReadWrite, mode, noExec = true
   )
   vmRegions.add(stackMappedRegion)
@@ -84,6 +84,7 @@ proc createUserTask*(
   priority: TaskPriority = 0
 ): Task =
   var vmRegions : seq[VMMappedRegion]
+  # can't use create(T) here because it doesn't obey the alignment
   var pml4 = cast[ptr PML4Table](new PML4Table)
 
   logger.info &"loading task from ELF image"
@@ -226,11 +227,13 @@ proc terminate*() =
   logger.info &"terminating task {task.id}"
   task.state = TaskState.Terminated
 
+  # free task's memory
   for vmRegion in task.vmRegions:
-    vmfree(uspace, vmRegion, task.pml4)
+    vmFreeRegion(uspace, vmRegion, task.pml4)
 
   sched.removeTask(task)
   task = nil
+
   sched.schedule()
 
 ###
@@ -241,7 +244,6 @@ proc resume*(task: Task) =
   logger.info &"setting task {task.id} to ready"
   task.state = TaskState.Ready
   sched.addTask(task)
-
 
 proc wakeupTasks*() =
   if sleepers.len == 0:
