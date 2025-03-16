@@ -89,7 +89,7 @@ proc bgaSetYOffset*(offset: uint16) =
 
 proc mapFramebuffer*(width, height: uint32): tuple[virtAddr: uint64, numPages: uint64] =
   let numPages = (width.uint64 * height.uint64 * 4 + (PageSize - 1)) div PageSize
-  let vmRegion = vmalloc(kspace, numPages)
+  let vmRegion = vmAllocRegion(kspace, numPages)
   vmMapRegion(
     region = VMRegion(start: vmRegion.start, npages: numPages),
     physAddr = fbPhysAddr.PhysAddr,

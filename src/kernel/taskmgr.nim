@@ -48,10 +48,12 @@ proc createStack*(
   mode: PageMode
 ): TaskStack =
   # logger.info &"creating stack of {npages} pages, mode={mode.uint64}"
-  let stackRegion = vmalloc(space, npages)
+  let stackRegion = vmAllocRegion(space, npages)
+  logger.info &"mapping stack at {stackRegion.start.uint64:#x}"
   let stackMappedRegion = vmMapRegion(
     stackRegion, pml4, paReadWrite, mode, noExec = true
   )
+  logger.info &"stack mapped at {stackMappedRegion.start.uint64:#x}"
   vmRegions.add(stackMappedRegion)
   result.data = cast[ptr UncheckedArray[uint64]](stackRegion.start)
   result.size = npages * PageSize

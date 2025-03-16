@@ -2,15 +2,33 @@
   Channel library functions
 ]#
 import common/serde
+import heap
 
 include syscalldef
 
 type
+  Channel* = ref object
+    id: int
+    mode: ChannelMode
+    heap: Heap
+
   ChannelMode* = enum
     Read
     Write
 
-proc open*(cid: int, mode: ChannelMode): int {.stackTrace: off.} =
+proc allocPages(numPages: int): pointer =
+  discard
+
+proc freePages(p: pointer, numPages: int) =
+  discard
+
+let channelPageAllocator = PageAllocator(
+  requestPages: allocPages,
+  freePages: freePages
+)
+
+
+proc open*(cid: int, mode: ChannelMode): Channel {.stackTrace: off.} =
   ## Open a channel
   ## 
   ## Arguments:
@@ -18,19 +36,26 @@ proc open*(cid: int, mode: ChannelMode): int {.stackTrace: off.} =
   ##   mode (in): channel open mode
   ## 
   ## Returns:
-  ##   0 on success
-  ##  -1 on error
+  ##  Channel on success
+  ##  nil on error
   ##
   let modeVal = mode.int
+  var ret: int
   asm """
     mov rdi, %1
     mov rsi, %2
     mov rdx, %3
     syscall
-    : "=a" (`result`)
+    : "=a" (`ret`)
     : "r" (`SysChannelOpen`), "r" (`cid`), "r" (`modeVal`)
     : "rdi", "rsi", "rdx"
   """
+
+  if ret < 0:
+    return nil
+
+  var heap = newHeap(channelPageAllocator)
+  result = Channel(id: cid, mode: mode, heap: heap)
 
 proc close*(cid: int): int {.discardable.} =
   ## Close a channel

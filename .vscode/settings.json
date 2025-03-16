@@ -11,6 +11,10 @@
     {
         "projectFile": "src/user/utask.nim",
         "fileRegex": "src/(user|syslib)/.*\\.nim"
+    },
+    {
+        "projectFile": "tests/syslib/heap/tbasic.nim",
+        "fileRegex": "tests/syslib/heap/.*\\.nim"
     }
   ]
 }

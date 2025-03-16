@@ -42,7 +42,8 @@ type
 
   PageFrame = object
     ## A page frame in physical memory.
-    rc*: uint16       # reference count
+    vaddr*: VirtAddr   ## Reverse mapping from physical to virtual
+    rc*: uint16       ## Reference count
 
   InvalidRequest* = object of CatchableError
   OutOfPhysicalMemory* = object of CatchableError

@@ -27,7 +27,7 @@ import kernel/vmm
 proc osTryAllocPages(size: int): pointer {.inline.} =
   let pageAccess = paReadWrite
   try:
-    let vaddr = vmalloc(kspace, roundup(size, PageSize), paWrite, pmSupervisor)
+    let vaddr = vmAllocRegion(kspace, roundup(size, PageSize), paWrite, pmSupervisor)
   except OutOfMemoryError:
     return nil
 

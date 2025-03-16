@@ -1,8 +1,9 @@
 #[
   x86_64 Interrupt Descriptor Table (IDT)
 ]#
-
 import gdt
+import sched
+import vmm
 
 type
   InterruptGate {.packed.} = object
@@ -58,25 +59,34 @@ proc installHandlerWithErrorCode*(vector: uint8, handler: InterruptHandlerWithEr
 
 proc cpuPageFaultHandler*(frame: ptr InterruptFrame, errorCode: uint64)
   {.cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#".} =
-  debugln ""
-  debugln &"CPU Exception: Page Fault (Error Code: {errorCode:#x})"
   # get the faulting address
   var cr2: uint64
   asm """
     mov %0, cr2
     : "=r"(`cr2`)
   """
-  debugln &"    Faulting address: {cr2:#018x}"
-  debugln ""
-  debugln "  Interrupt Frame:"
-  debugln &"    IP: {frame.ip:#018x}"
-  debugln &"    CS: {frame.cs:#018x}"
-  debugln &"    Flags: {frame.flags:#018x}"
-  debugln &"    SP: {frame.sp:#018x}"
-  debugln &"    SS: {frame.ss:#018x}"
-  debugln ""
-  debugln getStackTrace()
-  quit()
+
+  let task = getCurrentTask()
+  let pml4 = if task != nil: task.pml4 else: kpml4
+  let handled = vmm.handlePageFault(cr2, errorCode, pml4)
+  # if not handled:
+  if task != nil and task.id == 1:
+    debugln ""
+    debugln &"CPU Exception: Page Fault (Error Code: {errorCode:#x})"
+    debugln &"    Faulting address: {cr2:#018x}"
+    debugln ""
+    debugln "  Interrupt Frame:"
+    debugln &"    IP: {frame.ip:#018x}"
+    debugln &"    CS: {frame.cs:#018x}"
+    debugln &"    Flags: {frame.flags:#018x}"
+    debugln &"    SP: {frame.sp:#018x}"
+    debugln &"    SS: {frame.ss:#018x}"
+    debugln ""
+    debugln getStackTrace()
+
+    if not handled:
+      debugln "  Page Fault not handled"
+      quit()
 
 proc cpuGeneralProtectionFaultHandler*(frame: ptr InterruptFrame, errorCode: uint64)
   {.cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#".} =

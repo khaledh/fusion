@@ -11,11 +11,11 @@ type
     writeThrough* {.bitsize: 1.}: uint64 # bit      3
     cacheDisable* {.bitsize: 1.}: uint64 # bit      4
     accessed* {.bitsize: 1.}: uint64     # bit      5
-    ignored1* {.bitsize: 1.}: uint64     # bit      6
+    ignored1* {.bitsize: 1.}: uint64     # bit      6 (ignored by CPU)
     reserved1* {.bitsize: 1.}: uint64    # bit      7
-    ignored2* {.bitsize: 4.}: uint64     # bits 11: 8
+    ignored2* {.bitsize: 4.}: uint64     # bits 11: 8 (ignored by CPU)
     physAddress* {.bitsize: 40.}: uint64 # bits 51:12
-    ignored3* {.bitsize: 11.}: uint64    # bits 62:52
+    ignored3* {.bitsize: 11.}: uint64    # bits 62:52 (ignored by CPU)
     xd* {.bitsize: 1.}: uint64           # bit     63
 
   # Page Directory Pointer Table Entry
@@ -26,11 +26,11 @@ type
     writeThrough* {.bitsize: 1.}: uint64 # bit      3
     cacheDisable* {.bitsize: 1.}: uint64 # bit      4
     accessed* {.bitsize: 1.}: uint64     # bit      5
-    ignored1* {.bitsize: 1.}: uint64     # bit      6
+    ignored1* {.bitsize: 1.}: uint64     # bit      6 (ignored by CPU)
     pageSize* {.bitsize: 1.}: uint64     # bit      7
-    ignored2* {.bitsize: 4.}: uint64     # bits 11: 8
+    ignored2* {.bitsize: 4.}: uint64     # bits 11: 8 (ignored by CPU)
     physAddress* {.bitsize: 40.}: uint64 # bits 51:12
-    ignored3* {.bitsize: 11.}: uint64    # bits 62:52
+    ignored3* {.bitsize: 11.}: uint64    # bits 62:52 (ignored by CPU)
     xd* {.bitsize: 1.}: uint64           # bit     63
 
   # Page Directory Entry
@@ -41,11 +41,11 @@ type
     writeThrough* {.bitsize: 1.}: uint64 # bit      3
     cacheDisable* {.bitsize: 1.}: uint64 # bit      4
     accessed* {.bitsize: 1.}: uint64     # bit      5
-    ignored1* {.bitsize: 1.}: uint64     # bit      6
+    ignored1* {.bitsize: 1.}: uint64     # bit      6 (ignored by CPU)
     pageSize* {.bitsize: 1.}: uint64     # bit      7
-    ignored2* {.bitsize: 4.}: uint64     # bits 11: 8
+    ignored2* {.bitsize: 4.}: uint64     # bits 11: 8 (ignored by CPU)
     physAddress* {.bitsize: 40.}: uint64 # bits 51:12
-    ignored3* {.bitsize: 11.}: uint64    # bits 62:52
+    ignored3* {.bitsize: 11.}: uint64    # bits 62:52 (ignored by CPU)
     xd* {.bitsize: 1.}: uint64           # bit     63
 
   # Page Table Entry
@@ -59,9 +59,9 @@ type
     dirty* {.bitsize: 1.}: uint64        # bit      6
     pat* {.bitsize: 1.}: uint64          # bit      7
     global* {.bitsize: 1.}: uint64       # bit      8
-    ignored2* {.bitsize: 3.}: uint64     # bits 11: 9
+    kflags* {.bitsize: 3.}: uint64       # bits 11: 9 (ignored by CPU)
     physAddress* {.bitsize: 40.}: uint64 # bits 51:12
-    ignored3* {.bitsize: 11.}: uint64    # bits 62:52
+    ignored3* {.bitsize: 11.}: uint64    # bits 62:52 (ignored by CPU)
     xd* {.bitsize: 1.}: uint64           # bit     63
 
   # Page Map Level 4 Table

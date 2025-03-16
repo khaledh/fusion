@@ -59,6 +59,11 @@ run *QEMU_ARGS: bootloader kernel user
 
   @git restore ovmf/OVMF_VARS.fd
 
+test:
+  testament --megatest:off all
+  # clean up executable test files
+  @find tests -type f -perm +100 -delete
+
 clean:
   git restore ovmf/OVMF_VARS.fd
   rm -rf build

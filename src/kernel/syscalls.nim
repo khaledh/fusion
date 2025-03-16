@@ -44,12 +44,6 @@ var
 
 proc syscallEntry() {.asmNoStackFrame.} =
   asm """
-  #   cmp rdi, 303
-  #   jne .skip
-  #   cli
-  #   hlt
-  # .skip:
-
     # save user stack pointer
     mov %0, rsp
 
@@ -220,7 +214,7 @@ proc channelOpen*(args: ptr SyscallArgs): int =
   let mode = args.arg2.int
   if mode < ChannelMode.low.int or mode > ChannelMode.high.int:
     return InvalidArg.int
-  
+
   let chMode = ChannelMode(mode)
 
   let currentTask = getCurrentTask()
@@ -285,7 +279,7 @@ proc channelAlloc*(args: ptr SyscallArgs): int =
 proc channelSend*(args: ptr SyscallArgs): int =
   ##
   ## Send data to a channel
-  ## 
+  ##
   ## Arguments:
   ##   arg1 (in): channel id
   ##   arg2 (in): data length
@@ -386,14 +380,14 @@ proc syscallInit*() =
   writeMSR(IA32_EFER, readMSR(IA32_EFER) or 1)  # Bit 0: SYSCALL Enable
 
   # set up segment selectors in IA32_STAR (Syscall Target Address Register)
-  # note that for SYSCALL:
+  # note that for SYSCALL, the kernel segment selectors are in:
   #   CS: IA32_STAR[47:32]
-  #   SS: IA32_STAR[47:32] + 8
-  # and for SYSRET:
+  #   SS:        "         + 8
+  # and for SYSRET, the user segment selectors are in:
   #   CS: IA32_STAR[63:48] + 16
-  #   SS: IA32_STAR[63:48] + 8
+  #   SS:        "         + 8
   # thus, setting both parts of the register to KernelCodeSegmentSelector
-  # satisfies both requirements (+0 is kernel CS, +8 is data segment, +16 is user CS)
+  # satisfies both requirements (+0 is kernel CS, +8 is (shared) data segment, +16 is user CS)
   let star = (
     (KernelCodeSegmentSelector.uint64 shl 32) or
     (KernelCodeSegmentSelector.uint64 shl 48)
@@ -403,5 +397,5 @@ proc syscallInit*() =
   # set up syscall entry point
   writeMSR(IA32_LSTAR, cast[uint64](syscallEntry))
 
-  # set up flags mask (should mask interrupt flag to disable interrupts)
+  # set up flags mask (should mask interrupt flag to disable interrupts upon entry)
   writeMSR(IA32_FMASK, 0x200)  # rflags will be ANDed with the *complement* of this value

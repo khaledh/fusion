@@ -14,10 +14,11 @@ type
     vmRegion*: VMRegion
     vmMappedRegions*: seq[VMMappedRegion]
     entryPoint*: pointer
-  
+
   LoadableSegment = object
     vaddr: VirtAddr
     npages: uint64
+    hdr: ptr ElfProgramHeader
     flags: ElfProgramHeaderFlags
 
   LoaderError* = object of CatchableError
@@ -46,6 +47,7 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
       let seg = LoadableSegment(
         vaddr: startPage.VirtAddr,
         npages: numPages,
+        hdr: ph,
         flags: ph.flags,
       )
       segs.add(seg)
@@ -68,7 +70,7 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
   let pageCount = (memSize + PageSize - 1) div PageSize
 
   # allocate a single contiguous region for the user image
-  let taskRegion = vmalloc(uspace, pageCount)
+  let taskRegion = vmAllocRegion(uspace, pageCount)
   # debugln &"loader: Allocated {taskRegion.npages} pages at {taskRegion.start.uint64:#x}"
 
   # adjust the individual regions' start addresses based on taskRegion.start
@@ -82,17 +84,19 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
     let region = VMRegion(start: seg.vaddr, npages: seg.npages)
     let access = if Writable in seg.flags: paReadWrite else: paRead
     let noExec = Executable notin seg.flags
-    let mappedRegion = vmMapRegion(region, pml4, access, pmUser, noExec)
+    let sourceRegion = VMRegion(start: seg.hdr.vaddr.VirtAddr, npages: seg.npages)
+    let mappedRegion = vmMapRegion(region, pml4, access, pmUser, noExec, some sourceRegion)
     taskMappedRegions.add(mappedRegion)
     # temporarily map the region in kernel space so that we can copy the segments and
     # apply relocations
     vmMapRegion(
       region = VMRegion(start: seg.vaddr, npages: seg.npages),
-      physAddr = mappedRegion.paddr,
+      # physAddr = mappedRegion.paddr,
       pml4 = kpml4,
       pageAccess = paReadWrite,
       pageMode = pmSupervisor,
       noExec = true,
+      source = some sourceRegion,
     )
   defer:
     # unmap the user image from kernel space on exit
@@ -144,7 +148,7 @@ type
     RelaSize = 8
     RelaEntSize = 9
     RelaCount = 0x6ffffff9
-  
+
   RelaEntry {.packed.} = object
     offset: uint64
     info: uint64

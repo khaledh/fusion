@@ -1,3 +1,13 @@
+*
+!**/
+!*.*
+
 .idea/
+
 build/
 diskimg/
+nimcache/
+testresults/
+
+nimble.develop
+nimble.paths

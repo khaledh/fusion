@@ -13,9 +13,9 @@
     tasks. However, tasks can communicate by getting access to shared memory regions
     (usually via the channels IPC).
 ]#
-import std/[algorithm, tables]
+import std/[algorithm, heapqueue, tables]
 
-import common/pagetables
+import common/[pagetables, segtree]
 import pmm
 
 ##########################################################################################
@@ -23,19 +23,24 @@ import pmm
 ##########################################################################################
 
 type
-  VMAddressSpace* = object
-    ## A virtual address space with a minimum (inclusive) and maximum (exclusive) address,
-    ## and a list of allocated regions in the address space.
-    minAddr*: VirtAddr
-    maxAddr*: VirtAddr
-    regions*: seq[VMRegion]
-
-  VMRegion* = object
+  VMRegion* = ref object
     ## A region of virtual memory with a start address and number of pages. A VM region is
     ## contiguous and does not overlap with other regions. VM regions are used to track
     ## allocated virtual memory in an address space.
     start*: VirtAddr
     npages*: uint64
+
+proc cmpRegionSize(a, b: VMRegion): bool {.inline.} =
+  a.npages > b.npages
+
+type
+  VMAddressSpace* = object
+    ## A virtual address space with a minimum (inclusive) and maximum (exclusive) address,
+    ## and a list of allocated regions in the address space represented as a segment tree.
+    minAddr*: VirtAddr
+    maxAddr*: VirtAddr
+    # regionTree* = SegmentTree[VMRegion]()
+    freeRegions* = initHeapQueue[VMRegion](cmp = cmpRegionSize)
 
   VMMappedRegion* = object
     ## A mapped region of virtual memory for a specific page table with specific access
@@ -43,9 +48,10 @@ type
     ## access flags, but they all share the same memory region.
     start*: VirtAddr
     npages*: uint64
-    paddr*: PhysAddr
+    # paddr*: PhysAddr
     flags*: VMMappedRegionFlags
     pml4*: ptr PML4Table
+    swapIn*: SwapIn
 
   VMMappedRegionFlag* {.size: sizeof(uint32).} = enum
     ## Access flags for a mapped region of virtual memory.
@@ -55,10 +61,16 @@ type
     _       = 31  # make the flags set 32 bits wide instead of 1 byte
   VMMappedRegionFlags* = set[VMMappedRegionFlag]
 
+  CustomPageFlag = enum
+    NotMapped = 0
+    Mapped = 1
+
   PhysAlloc* = proc (nframes: Positive): PhysAddr
     ## A proc that allocates physical memory.
   PhysAlias* = proc (paddr: PhysAddr, nframes: Positive)
     ## A proc that aliases a physical memory region (for shared memory).
+  SwapIn* = proc (vaddr: VirtAddr): PhysAddr
+    ## A proc that swaps in a page from backing storage.
 
   OutOfMemoryError* = object of CatchableError
     ## Raised when there is not enough virtual memory to allocate a new region in a
@@ -80,7 +92,8 @@ proc vmMapRegion*(
   pageAccess: PageAccess,
   pageMode: PageMode,
   noExec: bool = false,
-): VMMappedRegion {.discardable.} 
+  source: Option[VMRegion] = none(VMRegion),
+): VMMappedRegion {.discardable.}
   ## Map a range of pages in the given page table structure. The physical memory is
   ## allocated automatically.
 
@@ -91,7 +104,7 @@ proc vmMapRegion*(
   pageAccess: PageAccess,
   pageMode: PageMode,
   noExec: bool = false,
-  alias: bool = true,
+  source: Option[VMRegion] = none(VMRegion),
 ): VMMappedRegion {.discardable.} 
   ## Map a range of pages in the given page table structure. The physical memory must be
   ## allocated before calling this function.
@@ -99,7 +112,7 @@ proc vmMapRegion*(
 proc vmUnmapRegion*(region: VMRegion, pml4: ptr PML4Table)
   ## Unmap a range of pages in the given page table structure.
 
-proc vmalloc*(space: var VMAddressSpace, pageCount: uint64): VMRegion
+proc vmAllocRegion*(space: var VMAddressSpace, pageCount: uint64): VMRegion
   ## Allocate a range of virtual memory pages in the given address space.
 
 proc vmFreeRegion*(space: var VMAddressSpace, region: VMMappedRegion, pml4: ptr PML4Table)
@@ -110,14 +123,27 @@ proc vmFreeRegion*(space: var VMAddressSpace, region: VMMappedRegion, pml4: ptr 
 # Implementation
 ##########################################################################################
 
+type
+  UserSpaceRange* = range[0x0000000000001000'u64..0x00007fffffffffff'u64]
+  KernelSpaceRange* = range[0xffff800000000000'u64..0xffffffffffffffff'u64]
+
 const
-  KernelSpaceMinAddr* = 0xffff800000000000'u64.VirtAddr
-  KernelSpaceMaxAddr* = 0xffffffffffffffff'u64.VirtAddr
-  UserSpaceMinAddr* = 0x0000000000001000'u64.VirtAddr
-  UserSpaceMaxAddr* = 0x00007fffffffffff'u64.VirtAddr
+  UserSpaceMinAddr* = UserSpaceRange.low.VirtAddr
+  UserSpaceMaxAddr* = UserSpaceRange.high.VirtAddr
+  KernelSpaceMinAddr* = KernelSpaceRange.low.VirtAddr
+  KernelSpaceMaxAddr* = KernelSpaceRange.high.VirtAddr
 
 let
   logger = DebugLogger(name: "vmm")
+
+template `end`*(region: VMRegion): VirtAddr =
+  region.start +! region.npages * PageSize
+
+template left*(region: VMRegion): uint64 =
+  region.start.uint64
+
+template right*(region: VMRegion): uint64 =
+  region.end.uint64
 
 var
   physicalMemoryVirtualBase: uint64 
@@ -127,9 +153,6 @@ var
   kspace*: VMAddressSpace  ## The kernel address space (upper half)
   uspace*: VMAddressSpace  ## The user address space (lower half)
   kpml4*: ptr PML4Table    ## The kernel PML4 table
-
-template `end`*(region: VMRegion): VirtAddr =
-  region.start +! region.npages * PageSize
 
 proc getActivePML4*(): ptr PML4Table
 proc vmInit*(
@@ -142,23 +165,35 @@ proc vmInit*(
   physicalMemoryVirtualBase = physMemoryVirtualBase
   pmalloc = physAlloc
   pmalias = physAlias
+  kpml4 = getActivePML4()
+
   kspace = VMAddressSpace(
     minAddr: KernelSpaceMinAddr,
     maxAddr: KernelSpaceMaxAddr,
-    regions: initialRegions,
   )
+  # add the initial vm regions to the kernel address space
+  for region in initialRegions:
+    kspace.regionTree.insert(region)
+
   uspace = VMAddressSpace(
     minAddr: UserSpaceMinAddr,
     maxAddr: UserSpaceMaxAddr,
-    regions: @[],
   )
-  kpml4 = getActivePML4()
 
   let (uspaceMin, uspaceMax) = (uspace.minAddr.uint64, uspace.maxAddr.uint64)
   let (kspaceMin, kspaceMax) = (kspace.minAddr.uint64, kspace.maxAddr.uint64)
   logger.info &"    user space: {uspaceMin:#018x} - {uspaceMax:#018x}"
   logger.info &"  kernel space: {kspaceMin:#018x} - {kspaceMax:#018x}"
   logger.info &"  physical mem: {physicalMemoryVirtualBase:#018x}"
+
+proc getAddressSpace(vaddr: VirtAddr): var VMAddressSpace =
+  ## Returns the address space for the given virtual address.
+  if vaddr.uint64 in UserSpaceRange.low..UserSpaceRange.high:
+    result = uspace
+  elif vaddr.uint64 in KernelSpaceRange.low..KernelSpaceRange.high:
+    result = kspace
+  else:
+    raise newException(ValueError, "Invalid virtual address")
 
 ##########################################################################################
 # Active PML4 utilities
@@ -193,6 +228,35 @@ proc setActivePML4*(pml4: ptr PML4Table) =
 # Mapping between virtual and physical addresses
 ##########################################################################################
 
+proc getPTEntry(vaddr: VirtAddr, pml4: ptr PML4Table): ptr PTEntry =
+  ## Traverses the given page table structure to find the page table entry corresponding
+  ## to the given virtual address. Returns `nil` if the virtual address is not mapped.
+
+  var pml4Index = (vaddr.uint64 shr 39) and 0x1FF
+  var pdptIndex = (vaddr.uint64 shr 30) and 0x1FF
+  var pdIndex = (vaddr.uint64 shr 21) and 0x1FF
+  var ptIndex = (vaddr.uint64 shr 12) and 0x1FF
+
+  if pml4[pml4Index].present == 0:
+    return nil
+
+  let pdptPhysAddr = PhysAddr(pml4[pml4Index].physAddress shl 12)
+  let pdpt = cast[ptr PDPTable](p2v(pdptPhysAddr))
+  if pdpt[pdptIndex].present == 0:
+    return nil
+
+  let pdPhysAddr = PhysAddr(pdpt[pdptIndex].physAddress shl 12)
+  let pd = cast[ptr PDTable](p2v(pdPhysAddr))
+  if pd[pdIndex].present == 0:
+    return nil
+
+  let ptPhysAddr = PhysAddr(pd[pdIndex].physAddress shl 12)
+  let pt = cast[ptr PTable](p2v(ptPhysAddr))
+  if pt[ptIndex].kflags != ord(CustomPageFlag.Mapped):
+    return nil
+
+  result = addr pt[ptIndex]
+
 proc p2v*(phys: PhysAddr): VirtAddr =
   ## Convert a physical address to a virtual address.
   ##
@@ -205,36 +269,20 @@ proc p2v*(phys: PhysAddr): VirtAddr =
 proc v2p*(virt: VirtAddr, pml4: ptr PML4Table): Option[PhysAddr] =
   ## Convert a virtual address to a physical address.
   ##
-  ## Traverses the given page table structure to find the physical address corresponding
-  ## to the given virtual address. Returns `none` if the virtual address is not mapped.
   if physicalMemoryVirtualBase == 0:
     # identity mapped
     return some PhysAddr(cast[uint64](virt))
 
-  var pml4Index = (virt.uint64 shr 39) and 0x1FF
-  var pdptIndex = (virt.uint64 shr 30) and 0x1FF
-  var pdIndex = (virt.uint64 shr 21) and 0x1FF
-  var ptIndex = (virt.uint64 shr 12) and 0x1FF
-
-  if pml4[pml4Index].present == 0:
+  let ptEntry = getPTEntry(virt, pml4)
+  if ptEntry.isNil:
+    # address is not mapped
     return none(PhysAddr)
 
-  let pdptPhysAddr = PhysAddr(pml4[pml4Index].physAddress shl 12)
-  let pdpt = cast[ptr PDPTable](p2v(pdptPhysAddr))
-  if pdpt[pdptIndex].present == 0:
+  if ptEntry.present == 0:
+    # page is not present
     return none(PhysAddr)
 
-  let pdPhysAddr = PhysAddr(pdpt[pdptIndex].physAddress shl 12)
-  let pd = cast[ptr PDTable](p2v(pdPhysAddr))
-  if pd[pdIndex].present == 0:
-    return none(PhysAddr)
-
-  let ptPhysAddr = PhysAddr(pd[pdIndex].physAddress shl 12)
-  let pt = cast[ptr PTable](p2v(ptPhysAddr))
-  if pt[ptIndex].present == 0:
-    return none(PhysAddr)
-
-  result = some PhysAddr(pt[ptIndex].physAddress shl 12)
+  result = some PhysAddr(ptEntry.physAddress shl 12)
 
 proc v2p*(virt: VirtAddr): Option[PhysAddr] =
   ## Convert a virtual address to a physical address using the currently active page
@@ -261,14 +309,13 @@ proc getOrCreateEntry[P, C](
 
   result.p = cast[ptr C](p2v(physAddr))
 
-proc vmMapRegion*(
+proc vmMapRegionImpl(
   region: VMRegion,
-  physAddr: PhysAddr,
+  physAddrOpt: Option[PhysAddr],
   pml4: ptr PML4Table,
   pageAccess: PageAccess,
   pageMode: PageMode,
   noExec: bool = false,
-  alias: bool = true,
 ): VMMappedRegion {.discardable.} =
   ## Map a range of pages in the given page table structure. The physical memory must be
   ## allocated before calling this function.
@@ -278,7 +325,7 @@ proc vmMapRegion*(
     xd = cast[uint64](noExec)
 
   var vaddr = region.start
-  var paddr = physAddr
+  var paddr = physAddrOpt.get(0'u64.PhysAddr)
 
   # logger.info (
   #   &"mapping {region.npages} pages at {vaddr.uint64:#x} to {paddr.uint64:#x}, " &
@@ -321,27 +368,23 @@ proc vmMapRegion*(
 
     # Page Table
     (pt, created) = getOrCreateEntry[PDTable, PTable](pd, pdIndex)
-    pt[ptIndex].physAddress = paddr.uint64 shr 12
-    pt[ptIndex].present = 1
     pt[ptIndex].write = access
     pt[ptIndex].user = mode
     pt[ptIndex].xd = xd
+    pt[ptIndex].kflags = ord(CustomPageFlag.Mapped)
     if created:
       # use the ignored bits of the parent to keep track of child entries count
       if pd[pdIndex].ignored3 < 512:
         inc pd[pdIndex].ignored3
-
-    # keep track of the number of mappings to this physical page
-    # TODO: what to do when there is more mappings than we can keep track of?
-    if pt[ptIndex].ignored3 < 0x7FF: # field is 11 bits wide
-      inc pt[ptIndex].ignored3
+    
+    # if we're given a physical address, mark the page as present
+    if physAddrOpt.isSome:
+      pt[ptIndex].physAddress = paddr.uint64 shr 12
+      pt[ptIndex].present = 1
+      inc paddr, PageSize
 
     inc vaddr, PageSize
-    inc paddr, PageSize
   
-  if alias and not pmalias.isNil:
-    pmalias(physAddr, region.npages)
-
   # map the flags and return the mapped region
   var flags = { VMMappedRegionFlag.Read }
   if pageAccess == paReadWrite:
@@ -352,9 +395,24 @@ proc vmMapRegion*(
   result = VMMappedRegion(
     start: region.start,
     npages: region.npages,
-    paddr: physAddr,
+    # paddr: physAddr,
     flags: flags,
     pml4: pml4,
+  )
+
+proc vmMapRegion*(
+  region: VMRegion,
+  physAddr: PhysAddr,
+  pml4: ptr PML4Table,
+  pageAccess: PageAccess,
+  pageMode: PageMode,
+  noExec: bool = false,
+  source: Option[VMRegion] = none(VMRegion),
+): VMMappedRegion {.discardable.} =
+  ## Map a VM region at a specific physical address in the given page table structure.
+  ## The physical memory must be allocated before calling this function.
+  result = vmMapRegionImpl(
+    region, some(physAddr), pml4, pageAccess, pageMode, noExec, source
   )
 
 proc vmMapRegion*(
@@ -363,11 +421,14 @@ proc vmMapRegion*(
   pageAccess: PageAccess,
   pageMode: PageMode,
   noExec: bool = false,
+  source: Option[VMRegion] = none(VMRegion),
 ): VMMappedRegion {.discardable.} =
   ## Map a range of pages in the given page table structure. The physical memory is
   ## allocated automatically.
-  let physAddr = pmalloc(region.npages)
-  result = vmMapRegion(region, physAddr, pml4, pageAccess, pageMode, noExec, alias = false)
+  # let physAddr = pmalloc(region.npages)
+  result = vmMapRegionImpl(
+    region, none(PhysAddr), pml4, pageAccess, pageMode, noExec, source
+  )
 
 proc vmUnmapRegion*(region: VMRegion, pml4: ptr PML4Table) =
   var virtAddr = region.start
@@ -431,10 +492,10 @@ proc vmUnmapRegion*(region: VMRegion, pml4: ptr PML4Table) =
     inc virtAddr, PageSize
 
 ##########################################################################################
-# Allocate and map virtual memory
+# Allocate and free virtual memory regions
 ##########################################################################################
 
-proc vmalloc*(space: var VMAddressSpace, pageCount: uint64): VMRegion =
+proc vmAllocRegion*(space: var VMAddressSpace, pageCount: uint64): VMRegion =
   ## Allocate a range of virtual memory pages in the given address space.
 
   # find a free region
@@ -448,10 +509,9 @@ proc vmalloc*(space: var VMAddressSpace, pageCount: uint64): VMRegion =
   if minAddr +! size > space.maxAddr:
     raise newException(OutOfMemoryError, "Out of virtual memory")
 
-  # add the region to the address space, and sort the regions by start address
-  result = VMRegion(start: minAddr, npages: pageCount)
-  space.regions.add(result)
-  space.regions = space.regions.sortedByIt(it.start)
+
+  # insert the region into the address space's region segment tree
+  space.regionTree.insert(region)
 
 # proc vmmap*(
 #   region: VMRegion,
@@ -510,7 +570,74 @@ proc vmFreeRegion*(
 
   # unmap the region and free the physical memory
   vmUnmapRegion(VMRegion(start: region.start, npages: region.npages), pml4)
-  pmFree(region.paddr, region.npages)
+  # pmFree(region.paddr, region.npages)
+
+##########################################################################################
+# Page fault handler
+##########################################################################################
+
+type
+  PFPresent = enum
+    NotPresent = 0
+    ProtectionViolation = 1
+  PFWrite = enum
+    Read = 0
+    Write = 1
+  PFUser = enum
+    Kernel = 0
+    User = 1
+  PFReservedBit = enum
+    NotReserved = 0
+    Reserved = 1
+  PFInstructionFetch = enum
+    NotInstruction = 0
+    Instruction = 1
+  PFProtectionKeyViolation = enum
+    PKNoViolation = 0
+    PKViolation = 1
+  PFShadowStackViolation = enum
+    SSNoViolation = 0
+    SSViolation = 1
+  PFHlat = enum
+    HlatNoViolation = 0
+    HlatViolation = 1
+  PFSgx = enum
+    SgxNoViolation = 0
+    SgxViolation = 1
+
+  PageFaultErrorCode {.packed.} = object
+    present {.bitsize: 1}: PFPresent
+    write {.bitsize: 1}: PFWrite
+    user {.bitsize: 1}: PFUser
+    rsvd {.bitsize: 1}: PFReservedBit
+    inst  {.bitsize: 1}: PFInstructionFetch
+    pk {.bitsize: 1}: PFProtectionKeyViolation
+    ss {.bitsize: 1}: PFShadowStackViolation
+    hlat {.bitsize: 1}: PFHlat
+    reserved0 {.bitsize: 7}: uint8
+    sgx {.bitsize: 1}: PFSgx
+    reserved1: uint16
+
+proc handlePageFault*(virtAddr: uint64, errorCode: uint64, pml4: ptr PML4Table): bool =
+  ## Handle a page fault. The faulting address is in `virtAddr`, and the error code is in
+  ## `errorCode`.
+  let pfErrorCode = cast[PageFaultErrorCode](errorCode)
+  
+  # check if the faulting address is mapped in the current task's page table
+  let ptEntry = getPTEntry(cast[VirtAddr](virtAddr), pml4)
+  if ptEntry.isNil:
+    logger.info &"page fault at {virtAddr.uint64:#x} (error code = {pfErrorCode})"
+    logger.info &"page at {virtAddr.uint64:#x} is not mapped"
+    return
+
+  # page is mapped but not present; allocate a new page
+  # logger.info &"page at {virtAddr.uint64:#x} is not present; allocating a new page"
+  let paddr = pmalloc(1)
+  ptEntry.physAddress = paddr.uint64 shr 12
+  ptEntry.present = 1
+
+  result = true
+
 
 ##########################################################################################
 # Dump page tables
