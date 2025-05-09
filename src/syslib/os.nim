@@ -4,49 +4,50 @@
 
 include syscalldef
 
+# Note: `rcx` and `r11` are changed by the CPU during the syscall:
+# - rcx is used to save return address
+# - r11 is used to save the rflags register
+#
+# That's why we tell the compiler that these registers are clobbered.
+
 proc getTaskId*(): int =
   asm """
-    mov rdi, %1
     syscall
     : "=a" (`result`)
-    : "i" (`SysGetTaskId`)
-    : "rdi"
+    : "D" (`SysGetTaskId`)
+    : "rcx", "r11", "memory"
   """
 
 proc yld*() =
   asm """
-    mov rdi, %0
     syscall
     :
-    : "i" (`SysYield`)
-    : "rdi"
+    : "D" (`SysYield`)
+    : "rcx", "r11", "memory"
   """
 
 proc suspend*() =
   asm """
-    mov rdi, %0
     syscall
     :
-    : "i" (`SysSuspend`)
-    : "rdi"
+    : "D" (`SysSuspend`)
+    : "rcx", "r11", "memory"
   """
 
 proc sleep*(durationMs: uint64) =
   asm """
-    mov rdi, %0
-    mov rsi, %1
     syscall
     :
-    : "i" (`SysSleep`), "r" (`durationMs`)
-    : "rdi", "rsi"
+    : "D" (`SysSleep`),
+      "S" (`durationMs`)
+    : "rcx", "r11", "memory"
   """
 
 proc exit*(code: int = 0) =
   asm """
-    mov rdi, %0
-    mov rsi, %1
     syscall
     :
-    : "i" (`SysExit`), "r" (`code`)
-    : "rdi", "rsi"
+    : "D" (`SysExit`),
+      "S" (`code`)
+    : "rcx", "r11", "memory"
   """

@@ -23,13 +23,10 @@ proc open*(cid: int, mode: ChannelMode): int {.stackTrace: off.} =
   ##
   let modeVal = mode.int
   asm """
-    mov rdi, %1
-    mov rsi, %2
-    mov rdx, %3
     syscall
     : "=a" (`result`)
-    : "r" (`SysChannelOpen`), "r" (`cid`), "r" (`modeVal`)
-    : "rdi", "rsi", "rdx"
+    : "D" (`SysChannelOpen`), "S" (`cid`), "d" (`modeVal`)
+    : "rcx", "r11", "memory"
   """
 
 proc close*(cid: int): int {.discardable.} =
@@ -44,12 +41,10 @@ proc close*(cid: int): int {.discardable.} =
   ##
 
   asm """
-    mov rdi, %1
-    mov rsi, %2
     syscall
     : "=a" (`result`)
-    : "r" (`SysChannelClose`), "r" (`cid`)
-    : "rdi", "rsi"
+    : "D" (`SysChannelClose`), "S" (`cid`)
+    : "rcx", "r11", "memory"
   """
 
 proc alloc*(cid: int, len: int): pointer {.stackTrace: off.} =
@@ -66,19 +61,17 @@ proc alloc*(cid: int, len: int): pointer {.stackTrace: off.} =
   ##
 
   var
-    pdata: pointer
+    pdata {.codegenDecl: """register $# $# asm("r8")""".}: pointer
     ret: int
 
   asm """
-    mov rdi, %2
-    mov rsi, %3
-    mov rdx, %4
     syscall
-    mov %1, r8
     : "=a" (`ret`),
       "=r" (`pdata`)
-    : "r" (`SysChannelAlloc`), "r" (`cid`), "r" (`len`)
-    : "rdi", "rsi", "rdx"
+    : "D" (`SysChannelAlloc`),
+      "S" (`cid`),
+      "d" (`len`)
+    : "rcx", "r11", "memory"
   """
 
   if ret < 0:
@@ -102,18 +95,17 @@ proc send*[T](cid: int, data: T): int {.discardable.} =
   proc sendAlloc(size: int): pointer =
     result = alloc(cid, size)
 
-  let packedObj = serialize(data, sendAlloc)
+  let packedObj {.codegenDecl: """register $# $# asm("r8")""".} = serialize(data, sendAlloc)
   let size = sizeof(packedObj.len) + packedObj.len
 
   asm """
-    mov rdi, %1
-    mov rsi, %2
-    mov rdx, %3
-    mov r8, %4
     syscall
-    : "=a" (`result`)
-    : "r" (`SysChannelSend`), "r" (`cid`), "r" (`size`), "m" (`packedObj`)
-    : "rdi", "rsi", "rdx", "r8"
+    : "=a" (`result`)         // rax (return value)
+    : "D" (`SysChannelSend`), // rdi (syscall number)
+      "S" (`cid`),            // rsi (channel id)
+      "d" (`size`),           // rdx (size of packed object)
+      "r" (`packedObj`)       // r8  (pointer to packed object)
+    : "rcx", "r11", "memory"
   """
 
 proc recv*[T](cid: int, data: var T): int =
@@ -129,18 +121,16 @@ proc recv*[T](cid: int, data: var T): int =
 
   var
     len: int
-    packedObj: ptr PackedObj
+    packedObj {.codegenDecl: """register $# $# asm("r8")""".}: ptr PackedObj
 
   asm """
-    mov rdi, %3
-    mov rsi, %4
     syscall
-    mov %1, rdx
-    mov %2, r8
-    : "=a" (`result`),
-      "=r" (`len`), "=r" (`packedObj`)
-    : "r" (`SysChannelRecv`), "r" (`cid`)
-    : "rdi", "rsi", "rdx", "r8"
+    : "=a" (`result`),         // rax (return value)
+      "=d" (`len`),            // rdx (length of packed object)
+      "=r" (`packedObj`)       // r8  (pointer to packed object)
+    : "D" (`SysChannelRecv`),  // rdi (syscall number)
+      "S" (`cid`)              // rsi (channel id)
+    : "rcx", "r11", "memory"
   """
 
   if result < 0:
