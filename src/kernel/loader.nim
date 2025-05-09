@@ -130,11 +130,17 @@ type
   
   RelaEntry {.packed.} = object
     offset: uint64
-    info: uint64
+    info: RelaEntryInfo
     addend: int64
 
-  RelaEntryType = enum
-    Relative = 8
+  RelaEntryInfo {.packed.} = object
+    `type`: uint8
+    sym: uint8
+    unused1: uint16
+    unused2: uint32
+
+  RelType = enum
+    Relative = 8  # R_X86_64_RELATIVE
 
 proc applyRelocations(image: ptr UncheckedArray[byte], dynOffset: uint64) =
   # debugln &"applyRelo: image at {cast[uint64](image):#x}, dynOffset = {dynOffset:#x}"
@@ -181,10 +187,10 @@ proc applyRelocations(image: ptr UncheckedArray[byte], dynOffset: uint64) =
   for i in 0 ..< relcount:
     let relent = rela[i]
     # debugln &"relent = (.offset = {relent.offset:#x}, .info = {relent.info:#x}, .addend = {relent.addend:#x})"
-    if relent.info != RelaEntryType.Relative.uint64:
+    if relent.info.type != RelType.Relative.uint8:
       raise newException(
         LoaderError,
-        &"Unsupported relocation type {relent.info:#x}. Only R_X86_64_RELATIVE is supported."
+        &"Unsupported relocation type {relent.info.type:#x}. Only R_X86_64_RELATIVE is supported."
       )
     # apply relocation
     let target = cast[ptr uint64](image +! relent.offset)

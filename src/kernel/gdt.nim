@@ -98,9 +98,9 @@ proc value*(sd: SegmentDescriptor): uint64 =
 
 const
   KernelCodeSegmentSelector* = 0x08
-  DataSegmentSelector* = 0x10 or 3     # RPL = 3
-  UserCodeSegmentSelector* = 0x18 or 3 # RPL = 3
-  TaskStateSegmentSelector* = 0x20
+  DataSegmentSelector*       = 0x10 or 3 # RPL = 3
+  UserCodeSegmentSelector*   = 0x18 or 3 # RPL = 3
+  TaskStateSegmentSelector*  = 0x20
 
 
 var
@@ -115,13 +115,14 @@ var
     limit00: cast[uint16](sizeof(tss) - 1),
     limit16: cast[uint8]((sizeof(tss) - 1) shr 16)
   )
+  # tssDescriptor is 128-bit, so we need to split it into two 64-bit values
   tssDescriptorLo = cast[uint64](tssDescriptor)
   tssDescriptorHi = (cast[ptr uint64](cast[uint64](tssDescriptor.addr) + 8))[]
 
   gdtEntries = [
     NullSegmentDescriptor.value,
     CodeSegmentDescriptor(dpl: 0).value, # Kernel code segment
-    DataSegmentDescriptor(dpl: 3).value, # Data segment
+    DataSegmentDescriptor(dpl: 3).value, # Data segment (shared)
     CodeSegmentDescriptor(dpl: 3).value, # User code segment
     tssDescriptorLo,                     # Task state segment (low 64 bits)
     tssDescriptorHi,                     # Task state segment (high 64 bits)

@@ -16,7 +16,7 @@ type
     flags*: VMRegionFlags
 
   VMRegionFlag* {.size: sizeof(uint32).} = enum
-    Execute = (0, "E")
+    Execute = (0, "X")
     Write   = (1, "W")
     Read    = (2, "R")
     _       = 31  # make the flags set 32 bits wide instead of 1 byte

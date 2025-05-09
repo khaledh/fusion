@@ -44,12 +44,6 @@ var
 
 proc syscallEntry() {.asmNoStackFrame.} =
   asm """
-  #   cmp rdi, 303
-  #   jne .skip
-  #   cli
-  #   hlt
-  # .skip:
-
     # save user stack pointer
     mov %0, rsp
 
@@ -93,7 +87,7 @@ proc syscallEntry() {.asmNoStackFrame.} =
   """
 
 proc syscall(args: ptr SyscallArgs): int {.exportc.} =
-  # logger.info &"num={args.num}"
+  logger.info &"num={args.num}"
   if args.num > syscallTable.high.uint64 or syscallTable[args.num] == nil:
     return InvalidSyscall.int
   result = syscallTable[args.num](args)
@@ -386,14 +380,18 @@ proc syscallInit*() =
   writeMSR(IA32_EFER, readMSR(IA32_EFER) or 1)  # Bit 0: SYSCALL Enable
 
   # set up segment selectors in IA32_STAR (Syscall Target Address Register)
-  # note that for SYSCALL:
-  #   CS: IA32_STAR[47:32]
-  #   SS: IA32_STAR[47:32] + 8
-  # and for SYSRET:
-  #   CS: IA32_STAR[63:48] + 16
-  #   SS: IA32_STAR[63:48] + 8
+  #
+  # we use KernelCodeSegmentSelector for both parts of the register (47:32 and 63:48)
+  # so for SYSCALL, the kernel segment selectors are:
+  #   CS: IA32_STAR[47:32]         <-- KernelCodeSegmentSelector
+  #   SS: IA32_STAR[47:32] + 8     <-- DataSegmentSelector (shared)
+  #
+  # and for SYSRET, the user segment selectors are:
+  #   CS: IA32_STAR[63:48] + 16    <-- UserCodeSegmentSelector
+  #   SS: IA32_STAR[63:48] + 8     <-- DataSegmentSelector (shared)
+  #
   # thus, setting both parts of the register to KernelCodeSegmentSelector
-  # satisfies both requirements (+0 is kernel CS, +8 is data segment, +16 is user CS)
+  # satisfies both requirements (+0 is kernel CS, +8 is shared data segment, +16 is user CS)
   let star = (
     (KernelCodeSegmentSelector.uint64 shl 32) or
     (KernelCodeSegmentSelector.uint64 shl 48)

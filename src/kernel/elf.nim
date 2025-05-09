@@ -86,7 +86,7 @@ type
     Tls = (7, "TLS")
   
   ElfProgramHeaderFlag {.size: sizeof(uint32).} = enum
-    Executable = (0, "E")
+    Executable = (0, "X")
     Writable   = (1, "W")
     Readable   = (2, "R")
     _          = 31  # make the flags set 32 bits wide instead of 1 byte
@@ -139,13 +139,13 @@ proc initElfImage(image: pointer): ElfImage =
     raise newException(UnsupportedElfImage, "Only little-endian ELF files are supported")
 
   if result.header.ident.version != ElfVersion.Current:
-    raise newException(UnsupportedElfImage, &"Only ELF version {ElfVersion.Current} is supported.")
+    raise newException(UnsupportedElfImage, &"Only ELF version {ElfVersion.Current} is supported")
 
   if result.header.type != ElfType.Shared:
-    raise newException(UnsupportedElfImage, "Only PIE type ELF files are supported.")
+    raise newException(UnsupportedElfImage, "Only position-independent executable ELF files are supported")
 
   if result.header.machine != ElfMachine.X86_64:
-    raise newException(UnsupportedElfImage, "Only x86-64 ELF files are supported.")
+    raise newException(UnsupportedElfImage, "Only x86-64 ELF files are supported")
 
 iterator sections(image: ElfImage): tuple[i: uint16, sh: ptr ElfSectionHeader] =
   let header = image.header
