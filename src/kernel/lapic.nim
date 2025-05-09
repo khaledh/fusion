@@ -4,16 +4,20 @@
 
 import std/algorithm
 
+import common/pagetables
 import cpu
+import idt
 import pit
+import util
+import vmm
 
 type
   IA32ApicBaseMsr {.packed.} = object
     reserved1   {.bitsize:  8.}: uint64
-    isBsp       {.bitsize:  1.}: uint64
+    isBsp       {.bitsize:  1.}: uint64  # Is Bootstrap Processor?
     reserved2   {.bitsize:  2.}: uint64
-    enabled     {.bitsize:  1.}: uint64
-    baseAddress {.bitsize: 24.}: uint64
+    enabled     {.bitsize:  1.}: uint64  # APIC Enabled?
+    baseAddress {.bitsize: 24.}: uint64  # Physical Base Address (bits 12-35)
     reserved3   {.bitsize: 28.}: uint64
 
   LapicOffset = enum
@@ -42,69 +46,86 @@ type
     TimerCurrentCount  = 0x390
     TimerDivideConfig  = 0x3e0
 
-  TimerMode = enum
-    OneShot     = 0b00 shl 17
-    Periodic    = 0b01 shl 17
-    TscDeadline = 0b10 shl 17
-
-  InterruptMask = enum
-    NotMasked = 0 shl 16
-    Masked    = 1 shl 16
-  
-  DeliveryStatus = enum
-    Idle        = 0 shl 12
-    SendPending = 1 shl 12
-  
   SpuriousInterruptVectorRegister {.packed.} = object
-    vector: uint8
-    apicEnabled {.bitsize: 1.}: uint8
-    reserved0 {.bitsize: 7.}: uint8
-    reserved1 : uint16
+    vector                  {.bitsize:  8.}: uint32
+    apicEnabled             {.bitsize:  1.}: uint32
+    focusProcessorChecking  {.bitsize:  1.}: uint32
+    reserved0               {.bitsize:  2.}: uint32
+    eoiBroadcastSuppression {.bitsize:  1.}: uint32
+    reserved1               {.bitsize: 19.}: uint32
 
 let
   logger = DebugLogger(name: "lapic")
 
-const
-  SpuriousInterruptVector = 0xff
-
 var
-  baseAddress: uint64
+  apicBaseAddress: uint64
 
-proc getBasePhysAddr*(): uint32 =
-  let baseMsr = cast[Ia32ApicBaseMsr](readMSR(IA32_APIC_BASE))
-  result = (baseMsr.baseAddress shl 12).uint32
+proc initBaseAddress() =
+  let apicBaseMsr = cast[IA32ApicBaseMsr](readMSR(IA32_APIC_BASE))
+  let apicPhysAddr = (apicBaseMsr.baseAddress shl 12).PhysAddr
+  # by definition, apicPhysAddr is aligned to a page boundary, so we map it directly
+  let apicVMRegion = vmalloc(kspace, 1)
+  mapRegion(
+    pml4 = kpml4,
+    virtAddr = apicVMRegion.start,
+    physAddr = apicPhysAddr,
+    pageCount = 1,
+    pageAccess = paReadWrite,
+    pageMode = pmSupervisor,
+    noExec = true
+  )
+  apicBaseAddress = apicVMRegion.start.uint64
 
-proc readRegister(offset: int): uint32 {.inline.} =
-  result = cast[ptr uint32](baseAddress + offset.uint16)[]
+proc readRegister(offset: LapicOffset): uint32 {.inline.} =
+  result = cast[ptr uint32](apicBaseAddress + offset.uint16)[]
 
-template readRegister(offset: LapicOffset): uint32 =
-  readRegister(offset.int)
-
-proc writeRegister(offset: int, value: uint32) {.inline.} =
-  cast[ptr uint32](baseAddress + offset.uint16)[] = value
-
-template writeRegister(offset: LapicOffset, value: uint32) =
-  writeRegister(offset.int, value)
+proc writeRegister(offset: LapicOffset, value: uint32) {.inline.} =
+  cast[ptr uint32](apicBaseAddress + offset.uint16)[] = value
 
 proc eoi*() {.inline.} =
   ## End of Interrupt
   writeRegister(LapicOffset.Eoi, 0)
 
-proc lapicInit*(baseAddr: uint64) =
-  baseAddress = baseAddr
-  # enable APIC
-  let svr = SpuriousInterruptVectorRegister(
-    vector: SpuriousInterruptVector,
-    apicEnabled: 1,
-  )
-  writeRegister(LapicOffset.SpuriousInterrupt, cast[uint32](svr))
+proc spuriousInterruptHandler*(frame: ptr InterruptFrame)
+  {.cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#".} =
+  # Ignore spurious interrupts and don't send an EOI
+  return
 
+proc lapicInit*() =
+  initBaseAddress()
+  # enable APIC and install spurious interrupt handler
+  let sivr = SpuriousInterruptVectorRegister(vector: 0xff, apicEnabled: 1)
+  writeRegister(LapicOffset.SpuriousInterrupt, cast[uint32](sivr))
+  # install spurious interrupt handler
+  installHandler(0xff, spuriousInterruptHandler)
 
 #############
 # APIC Timer
 #############
 
 type
+  LvtTimerRegister {.packed.} = object
+    vector         {.bitsize:  8.}: uint8
+    reserved0      {.bitsize:  4.}: uint8
+    deliveryStatus {.bitsize:  1.}: DeliveryStatus
+    reserved1      {.bitsize:  3.}: uint8
+    mask           {.bitsize:  1.}: InterruptMask
+    mode           {.bitsize:  2.}: TimerMode
+    reserved2      {.bitsize: 13.}: uint16
+
+  TimerMode = enum
+    OneShot     = 0b00
+    Periodic    = 0b01
+    TscDeadline = 0b10
+
+  InterruptMask = enum
+    NotMasked   = 0
+    Masked      = 1
+  
+  DeliveryStatus = enum
+    Idle        = 0
+    SendPending = 1
+  
   LvtTimerDivisor* {.size: 4.} = enum
     DivideBy2   = 0b0000
     DivideBy4   = 0b0001
@@ -142,7 +163,8 @@ proc calcFrequency(): tuple[timerFreq: uint32, tscFreq: uint64] =
   let pitCount = uint16((PitFrequency div 1000) * pitInterval)
 
   # set the APIC timer to one-shot mode with max count
-  writeRegister(LapicOffset.LvtTimer, TimerMode.OneShot.uint32)
+  let lvtTimer = LvtTimerRegister(mode: TimerMode.OneShot)
+  writeRegister(LapicOffset.LvtTimer, cast[uint32](lvtTimer))
   writeRegister(LapicOffset.TimerDivideConfig, TimerDivideBy.uint32)
   writeRegister(LapicOffset.TimerInitialCount, uint32.high)
 
@@ -176,7 +198,7 @@ proc calcFrequency(): tuple[timerFreq: uint32, tscFreq: uint64] =
   result = (timerFreq, tscFreq)
 
 proc setTimer*(vector: uint8, durationMs: uint32) =
-  logger.info "calculating apic timer frequency"
+  logger.info "calibrating tsc and apic timer frequency"
 
   var timerFreqs: array[5, uint32]
   var tscFreqs: array[5, uint64]
@@ -186,15 +208,22 @@ proc setTimer*(vector: uint8, durationMs: uint32) =
   # discard lowest and highest values
   sort(timerFreqs)
   timerFreq = (timerFreqs[1] + timerFreqs[2] + timerFreqs[3]) div 3
-  logger.info &"  ...apic timer frequency: {timerFreq} Hz"
+  let timerFreqRounded = roundWithTolerance(timerFreq, 100) # 1% tolerance
+  logger.info &"  ...timer frequency: {timerFreqRounded div 1000_000} MHz (measured: {timerFreq} Hz)"
 
   sort(tscFreqs)
   tscFreq = (tscFreqs[1] + tscFreqs[2] + tscFreqs[3]) div 3
-  logger.info &"  ...tsc frequency: {tscFreq} Hz"
+  let tscFreqRounded = roundWithTolerance(tscFreq, 100) # 1% tolerance
+  logger.info &"  ...tsc frequency:   {tscFreqRounded div 1000_000} MHz (measured: {tscFreq} Hz)"
 
   logger.info &"  ...setting apic timer interval to {durationMs} ms (vector {vector:#x})"
   let initialCount = uint32((timerFreq * durationMs) div (1000 * TimerDivisor))
 
-  writeRegister(LapicOffset.LvtTimer, vector.uint32 or TimerMode.Periodic.uint32)
+  let lvtTimer = LvtTimerRegister(
+    vector: vector,
+    mask: InterruptMask.NotMasked,
+    mode: TimerMode.Periodic,
+  )
+  writeRegister(LapicOffset.LvtTimer, cast[uint32](lvtTimer))
   writeRegister(LapicOffset.TimerDivideConfig, TimerDivideBy.uint32)
   writeRegister(LapicOffset.TimerInitialCount, initialCount)

@@ -49,20 +49,7 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   idtInit()
 
   logger.info "init lapic"
-  let lapicPhysAddr = lapic.getBasePhysAddr()
-  let lapicFrameAddr = lapicPhysAddr - (lapicPhysAddr mod PageSize)
-  # map LAPIC frame into virtual memory
-  let lapicVMRegion = vmalloc(kspace, 1)
-  mapRegion(
-    pml4 = getActivePML4(),
-    virtAddr = lapicVMRegion.start,
-    physAddr = lapicFrameAddr.PhysAddr,
-    pageCount = 1,
-    pageAccess = paReadWrite,
-    pageMode = pmSupervisor,
-    noExec = true
-  )
-  lapicInit(lapicVMRegion.start.uint64)
+  lapicInit()
 
   pci.showPciConfig()
   devmgrInit()
