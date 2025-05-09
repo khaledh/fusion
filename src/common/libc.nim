@@ -3,7 +3,7 @@
 ]#
 
 {.used.}
-{.compile: "src/include/stdio.c".}
+{.compile: "include/stdio.c".}
 
 type
   const_pointer {.importc: "const void *".} = pointer
