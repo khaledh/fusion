@@ -34,6 +34,8 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.raw &"Fusion Kernel (v{KernelVersion})\n"
   logger.raw "\n"
 
+  showCpuid()
+
   logger.info "init pmm"
   pmInit(bootInfo.physicalMemoryVirtualBase, bootInfo.physicalMemoryMap)
 
