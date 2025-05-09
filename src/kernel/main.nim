@@ -2,9 +2,9 @@
   Fusion kernel
 ]#
 
-import common/[bootinfo, libc, malloc, pagetables, serde]
+import common/[bootinfo, libc, malloc, serde]
 import
-  channels, cpu, ctxswitch, devmgr, drivers/pci, idt, lapic, gfxsrv,
+  channels, cpu, ctxswitch, devmgr, drivers/pci, idt, lapic,
   gdt, pmm, sched, syscalls, taskdef, taskmgr, timer, vmm
 
 const KernelVersion = "0.1.0"
@@ -66,7 +66,6 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.info "creating tasks"
 
   var idleTask = createKernelTask(cpu.idle, "idle", TaskPriority.low)
-  # let gfxTask = createKernelTask(gfxsrv.start, "gfxsrv")
 
   # create user tasks [for testing]
   var utask1 = createUserTask(
@@ -97,7 +96,6 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   # end test channels
 
   logger.info "init scheduler"
-  # schedInit([gfxTask, utask1, utask2])
   schedInit([utask1, utask2])
 
   logger.info "switching to the idle task"
