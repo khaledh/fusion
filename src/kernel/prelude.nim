@@ -23,6 +23,10 @@ type
   PhysAddr* = distinct uint64
 
 const
+  KiB* = 1024'u64
+  MiB* = KiB * KiB
+  GiB* = KiB * MiB
+
   PageSize* = 4096
 
 # virtual address operations

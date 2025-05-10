@@ -51,23 +51,32 @@ proc createStack*(
   result.size = npages * PageSize
   result.bottom = cast[uint64](result.data) + result.size
 
-# task initial stack frame
+# New task stack frame
 #
-# stack
-# bottom --> +-------------------+
-#            | ss                |
+# Steps when task is about to execute:
+# 1. `ctxswitch.resume` loads `rsp` with task.rsp and jumps to `ctxswitch.returnToTask`
+# 2. `ctxswitch.returnToTask` pops the initial task registers (zeros) from the stack
+# 3. `ctxswitch.returnToTask` executs `ret` which pops the `taskmgr.iretq` proc ptr into `rip`
+# 4. `taskmgr.iretq` executes `iretq` causing the cpu to pop the `InterruptStackFrame` from the stack
+#     a. `cs:rip` points to the task's entry point
+#     b. `ss:rsp` points to the task's user stack
+#     c. `rflags` is set to 0x202 (interrupts enabled)
+# 5. The task begins execution using its user stack
+#
+#            +-------------------+
+#      0xfff | ss                | <-- stack bottom
 #            | rsp               |
 #            | rflags            | <-- `InterruptStackFrame` (pushed/popped by cpu)
 #            | cs                |
 #            | rip               |
 #            +-------------------+
-#            | iretq proc ptr    | <-- `ret` instruction will pop this into `rip`, which
+#      0xfd8 | iretq proc ptr    | <-- `ret` instruction will pop this into `rip`, which
 #            +-------------------+     will execute `iretq`
-#            | rax               |
+#      0xfd0 | rax               |
 #            | ...               |
 #            | ...               | <-- `TaskRegs` (pushed/popped by kernel)
 #            | ...               |
-#    rsp --> | r15               |
+#      0xf58 | r15               | <-- rsp
 #            +-------------------+
 #
 

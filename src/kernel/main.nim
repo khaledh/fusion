@@ -39,6 +39,7 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
 
   logger.info "init vmm"
   vmInit(bootInfo.physicalMemoryVirtualBase, pmm.pmAlloc)
+  vmAddRegion(kspace, bootInfo.physicalMemoryVirtualBase.VirtAddr, bootInfo.physicalMemoryPages)
   vmAddRegion(kspace, bootInfo.kernelImageVirtualBase.VirtAddr, bootInfo.kernelImagePages)
   vmAddRegion(kspace, bootInfo.kernelStackVirtualBase.VirtAddr, bootInfo.kernelStackPages)
 
