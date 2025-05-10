@@ -209,14 +209,14 @@ proc setTimer*(vector: uint8, durationMs: uint32) =
   sort(timerFreqs)
   timerFreq = (timerFreqs[1] + timerFreqs[2] + timerFreqs[3]) div 3
   let timerFreqRounded = roundWithTolerance(timerFreq, 100) # 1% tolerance
-  logger.info &"  ...timer frequency: {timerFreqRounded div 1000_000} MHz (measured: {timerFreq} Hz)"
+  logger.info &"  timer frequency: {timerFreqRounded div 1000_000} MHz (measured: {timerFreq} Hz)"
 
   sort(tscFreqs)
   tscFreq = (tscFreqs[1] + tscFreqs[2] + tscFreqs[3]) div 3
   let tscFreqRounded = roundWithTolerance(tscFreq, 100) # 1% tolerance
-  logger.info &"  ...tsc frequency:   {tscFreqRounded div 1000_000} MHz (measured: {tscFreq} Hz)"
+  logger.info &"  tsc frequency:   {tscFreqRounded div 1000_000} MHz (measured: {tscFreq} Hz)"
 
-  logger.info &"  ...setting apic timer interval to {durationMs} ms (vector {vector:#x})"
+  logger.info &"  setting apic timer interval to {durationMs} ms (vector {vector:#x})"
   let initialCount = uint32((timerFreq * durationMs) div (1000 * TimerDivisor))
 
   let lvtTimer = LvtTimerRegister(

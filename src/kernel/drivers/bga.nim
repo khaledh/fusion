@@ -63,8 +63,8 @@ proc pciInit*(dev: PciDeviceConfig) =
   let bgaId = bgaReadRegister(BgaPortIndexId)
   fbPhysAddr = dev.bar[0]
 
-  logger.info &"  ...id = {bgaId:0>4x}"
-  logger.info &"  ...framebuffer physical address = {fbPhysAddr:0>16x}"
+  logger.info &"  id = {bgaId:0>4x}"
+  logger.info &"  framebuffer physical address = {fbPhysAddr:>#016x}"
 
 proc getFramebuffer*(): ptr UncheckedArray[uint32] =
   cast[ptr UncheckedArray[uint32]](fbVirtAddr)
@@ -114,11 +114,11 @@ proc setResolution*(xres, yres: uint16) =
 
   let virtWidth = bgaReadRegister(BgaPortIndexVirtWidth)
   let virtHeight = bgaReadRegister(BgaPortIndexVirtHeight)
-  logger.info &"  ...virtual resolution = {virtWidth}x{virtHeight}"
+  logger.info &"  virtual resolution = {virtWidth}x{virtHeight}"
 
   if fbVirtAddr != 0:
-    logger.info &"  ...unmapping old framebuffer"
+    logger.info &"  unmapping old framebuffer"
     unmapFramebuffer(fbVirtAddr, fbNumPages)
 
   (fbVirtAddr, fbNumPages) = mapFramebuffer(virtWidth, virtHeight)
-  logger.info &"  ...mapped {fbNumPages} pages of video memory @ {fbVirtAddr:#x}"
+  logger.info &"  mapped {fbNumPages} pages of video memory @ {fbVirtAddr:#x}"

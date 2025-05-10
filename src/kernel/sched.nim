@@ -65,6 +65,9 @@ proc schedule*() =
   var nextTask = readyTasks.pop()
 
   logger.info &"switching -> {nextTask.id}"
+  if nextTask.id == 0:
+    logger.info "idle"
+
   switchTo(nextTask)
 
 proc schedInit*(tasks: openArray[Task]) =

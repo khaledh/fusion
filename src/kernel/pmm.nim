@@ -19,10 +19,14 @@ type
   InvalidRequest* = object of CatchableError
   OutOfPhysicalMemory* = object of CatchableError
 
+let
+  logger = DebugLogger(name: "pmm")
+
 var
   head: ptr PMNode
   maxPhysAddr: PhysAddr # exclusive
   physicalMemoryVirtualBase: uint64
+  physicalMemoryPages: uint64
   reservedRegions: seq[PMRegion]
 
 proc toPhysAddr(p: ptr PMNode): PhysAddr {.inline.} =
@@ -57,8 +61,12 @@ proc overlaps(region1, region2: PMRegion): bool =
     r2.start < endAddr(r1.start, r1.nframes)
   )
 
-proc pmInit*(physMemoryVirtualBase: uint64, memoryMap: MemoryMap) =
+proc pmInit*(memoryMap: MemoryMap, physMemoryVirtualBase, physMemoryPages: uint64) =
   physicalMemoryVirtualBase = physMemoryVirtualBase
+  physicalMemoryPages = physMemoryPages
+
+  logger.info &"  ram size: {bytesToBinSize(physicalMemoryPages * FrameSize)}"
+  logger.info &"  ram base: {physMemoryVirtualBase:#x} (virtual)"
 
   var prev: ptr PMNode
 

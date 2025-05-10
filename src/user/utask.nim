@@ -24,18 +24,18 @@ proc UserMain*(param: int) {.exportc.} =
   
   print(dataIn)
 
-  if dataIn.startsWith("ping"):
+  if dataIn.startsWith(">>"):
     sleep(100)
-    send(cid = 0, data = "pong from task " & $tid)
+    send(cid = 0, data = "<< \e[93mpong from task " & $tid & "\e[0m")
     sleep(100)
     if recv[string](cid = 0, dataIn) < 0:
       close(cid = 0)
       exit(1)
     print(dataIn)
 
-  elif dataIn.startsWith("pong"):
+  elif dataIn.startsWith("<<"):
     sleep(100)
-    send(cid = 0, data = "pong from task " & $tid)
+    send(cid = 0, data = ">> \e[93mping from task " & $tid & "\e[0m")
 
   close(cid = 0)
   exit(0)

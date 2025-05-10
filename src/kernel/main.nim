@@ -35,7 +35,11 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.raw "\n"
 
   logger.info "init pmm"
-  pmInit(bootInfo.physicalMemoryVirtualBase, bootInfo.physicalMemoryMap)
+  pmInit(
+    bootInfo.physicalMemoryMap,
+    bootInfo.physicalMemoryVirtualBase,
+    bootInfo.physicalMemoryPages,
+  )
 
   logger.info "init vmm"
   vmInit(bootInfo.physicalMemoryVirtualBase, pmm.pmAlloc)
@@ -64,11 +68,31 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.info "init task manager"
   taskmgrInit()
 
-  logger.info "creating tasks"
-
   var idleTask = createKernelTask(cpu.idle, "idle", TaskPriority.low)
 
-  # create user tasks [for testing]
+  logger.info "init scheduler"
+  schedInit([])
+
+  ############### testing #######################################################
+  logger.info ""
+  logger.info &"{dim()}========== for testing =========={undim()}"
+
+  # test channel
+  logger.info "creating a channel"
+  let ch = channels.create(msgSize = sizeof(int))
+
+  proc sendAlloc(size: int): pointer =
+    result = channels.alloc(ch.id, size)
+
+  let packedObj = serialize(">> \e[91mping from kernel\e[0m", sendAlloc)
+  let size = sizeof(packedObj.len) + packedObj.len
+  let msg = Message(len: size, data: cast[ptr UncheckedArray[byte]](packedObj))
+
+  discard channels.send(ch.id, msg)
+
+  # test user tasks
+  logger.info &"creaeting two user tasks"
+
   var utask1 = createUserTask(
     imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
     imagePageCount = bootInfo.userImagePages,
@@ -80,26 +104,15 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
     name = "utask2",
   )
 
-  # test channels
+  sched.addTask(utask1)
+  sched.addTask(utask2)
 
-  logger.info "creating a channel [for testing]"
-  let ch = newChannel(msgSize = sizeof(int))
+  logger.info &"{dim()}================================={undim()}"
+  logger.info ""
+  ############### /testing ######################################################
 
-  proc sendAlloc(size: int): pointer =
-    result = channels.alloc(ch.id, size)
-
-  let packedObj = serialize("ping from kernel", sendAlloc)
-  let size = sizeof(packedObj.len) + packedObj.len
-  let msg = Message(len: size, data: cast[ptr UncheckedArray[byte]](packedObj))
-
-  discard send(ch.id, msg)
-
-  # end test channels
-
-  logger.info "init scheduler"
-  schedInit([utask1, utask2])
-
-  logger.info "switching to the idle task"
+  logger.info "kernel ready"
+  logger.raw "\n"
   switchTo(idleTask)
 
 ####################################################################################################

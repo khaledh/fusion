@@ -87,7 +87,6 @@ proc syscallEntry() {.asmNoStackFrame.} =
   """
 
 proc syscall(args: ptr SyscallArgs): int {.exportc.} =
-  logger.info &"num={args.num}"
   if args.num > syscallTable.high.uint64 or syscallTable[args.num] == nil:
     return InvalidSyscall.int
   result = syscallTable[args.num](args)
@@ -352,7 +351,9 @@ proc print*(args: ptr SyscallArgs): int =
     return InvalidArg.int
 
   let s = cast[ptr string](args.arg1)
+  logger.raw "\n"
   logger.raw s[]
+  logger.raw "\n"
   logger.raw "\n"
 
 

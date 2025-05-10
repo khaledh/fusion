@@ -154,7 +154,7 @@ type
 proc terminate*()
 
 proc kernelTaskWrapper*(kproc: KernelProc) =
-  logger.info &"running kernel task \"{getCurrentTask().name}\""
+  logger.info &"starting kernel task \"{getCurrentTask().name}\""
   kproc()
   terminate()
 

@@ -72,7 +72,7 @@ proc newChannelId(): int =
     result = nextChannelId
     inc nextChannelId
 
-proc newChannel*(msgSize: int, msgCapacity: int = DefaultMessageCapacity): Channel =
+proc create*(msgSize: int, msgCapacity: int = DefaultMessageCapacity): Channel =
   let buffSize = msgSize * msgCapacity
   let numPages = (buffSize + PageSize - 1) div PageSize
   let buffRegion = vmalloc(uspace, numPages.uint64)
@@ -97,7 +97,7 @@ proc newChannel*(msgSize: int, msgCapacity: int = DefaultMessageCapacity): Chann
     writeLock: newSpinLock(),
   )
   channels[result.id] = result
-  logger.info &"newChannel: created channel id {result.id} @ {cast[uint64](result.buffer.data):#x}"
+  logger.info &"create: created channel id {result.id} @ {cast[uint64](result.buffer.data):#x}"
 
 proc open*(chid: int, task: Task, mode: ChannelMode): int =
   ## Open a channel for a task in a specific mode. Map the buffer to the task's address space.

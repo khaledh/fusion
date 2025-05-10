@@ -19,13 +19,20 @@ const
   BootInfoPages = BootInfoSize div PageSize
   BootInfoVirtualBase = 0xffff_ffff_ffff_0000'u64 - BootInfoSize # Last page of address space
 
-  KernelStackSize = 16 * KiB
+  KernelStackSize = 64 * KiB
   KernelStackPages = KernelStackSize div PageSize
   KernelStackVirtualEnd = BootInfoVirtualBase  # Right below BootInfo
   KernelStackVirtualBase = KernelStackVirtualEnd - KernelStackSize
 
+  KernelImagePath = "\\efi\\fusion\\kernel.bin"
+  UserImagePath = "\\efi\\fusion\\utask.bin"
+
 let
   logger = DebugLogger(name: "boot")
+
+template sizeToPages*(size: uint64): uint64 =
+  # round up to nearest page
+  (size + PageSize - 1'u64) div PageSize
 
 ####################################################################################################
 # Forward declarations
@@ -41,7 +48,7 @@ proc loadImage(
   rootDir: ptr EfiFileProtocol,
   memoryType: EfiMemoryType,
   loadAddress: Option[EfiPhysicalAddress] = none(EfiPhysicalAddress),
-): tuple[base: EfiPhysicalAddress, pages: uint64]
+): tuple[base: EfiPhysicalAddress, size: uint64]
 
 proc convertUefiMemoryMap(
   uefiMemoryMap: ptr UncheckedArray[EfiMemoryDescriptor],
@@ -95,6 +102,9 @@ proc EfiMain(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus {.ex
     unhandledException(e)
 
 proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus =
+  logger.raw "Fusion UEFI Bootloader\n"
+  logger.raw "\n"
+
   consoleOutColor "Fusion OS Bootloader", fgYellow
   echo ""
   echo ""
@@ -124,25 +134,34 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
   checkStatus fileSystem.openVolume(fileSystem, addr rootDir)
 
   # load kernel image
-  let (kernelImagePhysicalBase, kernelImagePages) = loadImage(
-    imagePath = W"efi\fusion\kernel.bin",
+  let (kernelImagePhysicalBase, kernelImageSize) = loadImage(
+    imagePath = W(KernelImagePath),
     rootDir = rootDir,
     memoryType = OsvKernelCode,
     loadAddress = KernelImagePhysicalBase.EfiPhysicalAddress.some
   )
+  let kernelImagePages = sizeToPages(kernelImageSize)
+  logger.info &"Loaded kernel image: {KernelImagePath}"
+  logger.info &"  base: {kernelImagePhysicalBase:#x}"
+  logger.info &"  size: {kernelImageSize} bytes"
+
 
   # load user task image
-  let (userImagePhysicalBase, userImagePages) = loadImage(
-    imagePath = W"efi\fusion\utask.bin",
+  let (userImagePhysicalBase, userImageSize) = loadImage(
+    imagePath = W(UserImagePath),
     rootDir = rootDir,
     memoryType = OsvUserCode,
   )
+  let userImagePages = sizeToPages(userImageSize)
+  logger.info &"Loaded user task image: {UserImagePath}"
+  logger.info &"  base: {userImagePhysicalBase:#x}"
+  logger.info &"  size: {userImageSize} bytes"
 
   # close the root directory
   consoleOut "boot: Closing root directory"
   checkStatus rootDir.close(rootDir)
 
-  consoleOut &"boot: Allocating memory for kernel stack (16 KiB)"
+  consoleOut &"boot: Allocating memory for kernel stack"
   var kernelStackPhysicalBase: uint64
   checkStatus uefi.sysTable.bootServices.allocatePages(
     AllocateAnyPages,
@@ -150,6 +169,7 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
     KernelStackPages,
     kernelStackPhysicalBase.addr,
   )
+  logger.info &"Allocated kernel stack: {KernelStackSize div 1024} KiB at {kernelStackPhysicalBase:#x}"
 
   consoleOut &"boot: Allocating memory for BootInfo"
   var bootInfoPhysicalBase: uint64
@@ -159,6 +179,7 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
     1,
     bootInfoPhysicalBase.addr,
   )
+  logger.info &"Allocated BootInfo: {BootInfoSize div 1024} KiB at {bootInfoPhysicalBase:#x}"
 
   # memory map
   var memoryMapSize = 0.uint
@@ -186,7 +207,7 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
   )
 
   # get memory map
-  echo "boot: Getting memory map and exiting boot services"
+  echo "boot: Getting memory map and exiting boot services..."
   status = uefi.sysTable.bootServices.getMemoryMap(
     addr memoryMapSize,
     cast[ptr EfiMemoryDescriptor](memoryMap),
@@ -194,6 +215,9 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
     addr memoryMapDescriptorSize,
     addr memoryMapDescriptorVersion
   )
+  logger.info "UEFI Memory Map:"
+  logger.info &"  size: {memoryMapSize} bytes"
+  logger.info &"  count: {memoryMapSize div memoryMapDescriptorSize} entries"
 
   # IMPORTANT: After this point we cannot output anything to the console, since calling
   # a boot service may change the memory map and invalidate our map key. We can only
@@ -201,6 +225,27 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
   if status != EfiSuccess:
     consoleOutError &" [failed, status = {status:#x}]"
     quit()
+
+  let physMemoryMap = convertUefiMemoryMap(memoryMap, memoryMapSize, memoryMapDescriptorSize)
+
+  # get max free physical memory address
+  var maxPhysAddr: PhysAddr
+  var currEndPhysAddr, prevEndPhysAddr: PhysAddr = 0.PhysAddr
+  for i in 0 ..< physMemoryMap.len:
+    currEndPhysAddr = physMemoryMap[i].start.PhysAddr +! physMemoryMap[i].nframes * PageSize
+    if physMemoryMap[i].start.PhysAddr == prevEndPhysAddr  or prevEndPhysAddr == 0xa0000.PhysAddr: # 384 KiB gap ok:
+      # contiguous memory, update maxPhysAddr
+      maxPhysAddr = currEndPhysAddr
+      prevEndPhysAddr = currEndPhysAddr
+    else:
+      break
+
+  let physMemorySize = maxPhysAddr.uint64
+  let physMemoryPages = physMemorySize div PageSize
+  logger.info &"Physical memory size: {bytesToBinSize(physMemorySize)}"
+
+
+  logger.info "Exiting UEFI boot services"
 
   status = uefi.sysTable.bootServices.exitBootServices(imgHandle, memoryMapKey)
   if status != EfiSuccess:
@@ -211,38 +256,36 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
   # logger.info &"UEFI Memory Map ({numEntries} entries):"
   # logger.raw &"""   {"Entry"}"""
   # logger.raw &"""   {"Type":22}"""
-  # logger.raw &"""   {"Start":>12}"""
-  # logger.raw &"""   {"Start (KB)":>15}"""
-  # logger.raw &"""   {"#Pages":>10}"""
-  # logger.info ""
-
+  # logger.raw &"""   {"Start (hex)":>12}"""
+  # logger.raw &"""   {"Start":>10}"""
+  # logger.raw &"""   {"Size":>10} {dimmed("(#Pages)")}"""
+  # logger.raw "\n"
+  #
+  # var prevEnd = 0'u64
   # for i in 0 ..< numEntries:
   #   let entry = cast[ptr EfiMemoryDescriptor](cast[uint64](memoryMap) + i * memoryMapDescriptorSize)
+  #   if entry.physicalStart.uint64 != prevEnd:
+  #     # gap
+  #     let size = entry.physicalStart.uint64 - prevEnd
+  #     logger.raw &"""           {dim()}{"-- gap --":22}"""
+  #     logger.raw &"   {prevEnd:>11x}h"
+  #     logger.raw &"   {bytesToBinSize(prevEnd):>10}"
+  #     logger.raw &"   {bytesToBinSize(size):>10} ({size div 4096})"
+  #     logger.raw &"{undim()}\n"
   #   logger.raw &"   {i:>5}"
   #   logger.raw &"   {entry.type:22}"
-  #   logger.raw &"   {entry.physicalStart:>#12x}"
-  #   logger.raw &"   {entry.physicalStart div 1024:>#15}"
-  #   logger.raw &"   {entry.numberOfPages:>#10}"
-  #   logger.info ""
+  #   logger.raw &"   {entry.physicalStart:>11x}{hex()}"
+  #   logger.raw &"   {bytesToBinSize(entry.physicalStart):>10}"
+  #   logger.raw &"   {bytesToBinSize(entry.numberOfPages * PageSize):>10} {dim()}({entry.numberOfPages}){undim()}"
+  #   logger.raw "\n"
+  #   prevEnd = entry.physicalStart + entry.numberOfPages * PageSize
+
 
   # ======= NO MORE UEFI BOOT SERVICES =======
 
-  logger.raw "Fusion UEFI Bootloader\n"
-  logger.raw "\n"
-
-  let physMemoryMap = convertUefiMemoryMap(memoryMap, memoryMapSize, memoryMapDescriptorSize)
-
-  # get max free physical memory address
-  var maxPhysAddr: PhysAddr
-  for i in 0 ..< physMemoryMap.len:
-    if physMemoryMap[i].type == Free:
-      maxPhysAddr = physMemoryMap[i].start.PhysAddr +! physMemoryMap[i].nframes * PageSize
-
-  let physMemoryPages: uint64 = maxPhysAddr.uint64 div PageSize
-
   let virtMemoryMap = createVirtualMemoryMap(kernelImagePages, physMemoryPages)
 
-  logger.info &" Preparing BootInfo"
+  logger.info &"Preparing BootInfo"
   initBootInfo(
     bootInfoPhysicalBase,
     physMemoryPages,
@@ -272,7 +315,7 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
 
   # jump to kernel
   let cr3 = cast[uint64](pml4)
-  logger.info &" Jumping to kernel at {cast[uint64](KernelImageVirtualBase):#010x}"
+  logger.info &"Jumping to kernel at {cast[uint64](KernelImageVirtualBase):#010x}"
   asm """
     mov rdi, %0  # bootInfo
     mov cr3, %1  # PML4
@@ -297,7 +340,7 @@ proc loadImage(
   rootDir: ptr EfiFileProtocol,
   memoryType: EfiMemoryType,
   loadAddress: Option[EfiPhysicalAddress] = none(EfiPhysicalAddress),
-): tuple[base: EfiPhysicalAddress, pages: uint64] =
+): tuple[base: EfiPhysicalAddress, size: uint64] =
   # open the image file
   var file: ptr EfiFileProtocol
 
@@ -343,7 +386,7 @@ proc loadImage(
   consoleOut "boot: Closing image file"
   checkStatus file.close(file)
 
-  result = (imageBase, imagePages.uint64)
+  result = (imageBase, fileInfo.fileSize)
 
 
 ####################################################################################################
@@ -489,39 +532,39 @@ proc createPageTable(
   # initialize vmm using identity-mapped physical memory
   vmInit(physMemoryVirtualBase = 0'u64, physAlloc = bootAlloc)
 
-  logger.info &" Creating new page tables"
+  logger.info &"Creating boot page tables"
   var pml4 = cast[ptr PML4Table](bootAlloc(1))
 
   # identity-map bootloader image
-  logger.info &"""   {"Identity-mapping bootloader\:":<30} base={bootloaderPhysicalBase:#010x}, pages={bootloaderPages}"""
+  logger.info &"""  {"Identity-mapping bootloader\:":<30} base={bootloaderPhysicalBase:#010x}, pages={bootloaderPages}"""
   identityMapRegion(
     pml4, bootloaderPhysicalBase.PhysAddr, bootloaderPages.uint64,
     paReadWrite, pmSupervisor
   )
 
   # identity-map boot info
-  logger.info &"""   {"Identity-mapping BootInfo\:":<30} base={bootInfoPhysicalBase:#010x}, pages={bootInfoPages}"""
+  logger.info &"""  {"Identity-mapping BootInfo\:":<30} base={bootInfoPhysicalBase:#010x}, pages={bootInfoPages}"""
   identityMapRegion(
     pml4, bootInfoPhysicalBase.PhysAddr, bootInfoPages,
     paReadWrite, pmSupervisor
   )
 
   # map all physical memory; assume 128 MiB of physical memory
-  logger.info &"""   {"Mapping physical memory\:":<30} base={PhysicalMemoryVirtualBase:#010x}, pages={physMemoryPages}"""
+  logger.info &"""  {"Mapping physical memory\:":<30} base={PhysicalMemoryVirtualBase:#010x}, pages={physMemoryPages}"""
   mapRegion(
     pml4, PhysicalMemoryVirtualBase.VirtAddr, 0.PhysAddr, physMemoryPages,
     paReadWrite, pmSupervisor
   )
 
   # map kernel to higher half
-  logger.info &"""   {"Mapping kernel to higher half\:":<30} base={KernelImageVirtualBase:#010x}, pages={kernelImagePages}"""
+  logger.info &"""  {"Mapping kernel to higher half\:":<30} base={KernelImageVirtualBase:#010x}, pages={kernelImagePages}"""
   mapRegion(
     pml4, KernelImageVirtualBase.VirtAddr, kernelImagePhysicalBase.PhysAddr, kernelImagePages,
     paReadWrite, pmSupervisor
   )
 
   # map kernel stack
-  logger.info &"""   {"Mapping kernel stack\:":<30} base={KernelStackVirtualBase:#010x}, pages={kernelStackPages}"""
+  logger.info &"""  {"Mapping kernel stack\:":<30} base={KernelStackVirtualBase:#010x}, pages={kernelStackPages}"""
   mapRegion(
     pml4, KernelStackVirtualBase.VirtAddr, kernelStackPhysicalBase.PhysAddr, kernelStackPages,
     paReadWrite, pmSupervisor
