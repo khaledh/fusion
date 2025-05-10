@@ -74,26 +74,13 @@ proc vmAddRegion*(space: var VMAddressSpace, start: VirtAddr, npages: uint64) =
 
 proc p2v*(phys: PhysAddr): VirtAddr
 proc getActivePML4*(): ptr PML4Table =
-  var cr3: uint64
-  asm """
-    mov %0, cr3
-    : "=r"(`cr3`)
-  """
-  result = cast[ptr PML4Table](p2v(cr3.PhysAddr))
+  let cr3 = getCR3()
+  result = cast[ptr PML4Table](p2v(cr3.pml4addr))
 
 proc v2p*(virt: VirtAddr): Option[PhysAddr]
 proc setActivePML4*(pml4: ptr PML4Table) =
-  var cr3 = v2p(cast[VirtAddr](pml4)).get
-  asm """
-    mov rcx, cr3
-    cmp rcx, %0
-    jz .done
-    mov cr3, %0
-  .done:
-    :
-    : "r"(`cr3`)
-    : "rcx"
-  """
+  let cr3 = newCR3(pml4addr = v2p(cast[VirtAddr](pml4)).get)
+  setCR3(cr3)
 
 ####################################################################################################
 # Mapping between virtual and physical addresses
