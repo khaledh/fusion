@@ -10,7 +10,7 @@ import loader
 import gdt
 import sched
 import timer
-import taskdef
+import task
 import vmm
 
 

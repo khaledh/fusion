@@ -6,7 +6,7 @@ import channels
 import cpu
 import gdt
 import sched
-import taskdef
+import task
 import taskmgr
 
 import syslib/syscalldef

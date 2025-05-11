@@ -7,7 +7,7 @@ import std/[heapqueue, sequtils]
 import ctxswitch
 import lapic
 import stopwatch as sw
-import taskdef
+import task
 
 let logger = DebugLogger(name: "sched")
 

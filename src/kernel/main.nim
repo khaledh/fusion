@@ -5,7 +5,7 @@
 import common/[bootinfo, libc, malloc, serde]
 import
   channels, cpu, ctxswitch, devmgr, drivers/pci, idt, lapic,
-  gdt, pmm, sched, syscalls, taskdef, taskmgr, timer, vmm
+  gdt, pmm, sched, syscalls, task, taskmgr, timer, vmm
 
 const KernelVersion = "0.1.0"
 

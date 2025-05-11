@@ -2,7 +2,7 @@ import std/deques
 
 import locks
 import sched
-import taskdef
+import task
 import taskmgr
 
 type

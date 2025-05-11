@@ -4,7 +4,7 @@ import common/pagetables
 import debugcon
 import locks
 import queues
-import taskdef
+import task
 import vmm
 
 ## Channels are used for message passing between tasks.

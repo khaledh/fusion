@@ -4,7 +4,7 @@
 
 import cpu
 import gdt
-import taskdef
+import task
 import vmm
 
 var

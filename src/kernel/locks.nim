@@ -1,7 +1,7 @@
 import std/deques
 
 import sched
-import taskdef
+import task
 import taskmgr
 
 
