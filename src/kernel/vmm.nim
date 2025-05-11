@@ -8,10 +8,10 @@ import common/pagetables
 import pmm
 
 type
-  PhysAlloc* = proc (nframes: uint64): PhysAddr
+  PhysAlloc* = proc (nframes: uint64): PAddr
 
   VMRegion* = object
-    start*: VirtAddr
+    start*: VAddr
     npages*: uint64
     flags*: VMRegionFlags
 
@@ -23,17 +23,17 @@ type
   VMRegionFlags* = set[VMRegionFlag]
 
   VMAddressSpace* = object
-    minAddress*: VirtAddr
-    maxAddress*: VirtAddr
+    minAddress*: VAddr
+    maxAddress*: VAddr
     regions*: seq[VMRegion]
 
   OutOfMemoryError* = object of CatchableError
 
 const
-  KernelSpaceMinAddress* = 0xffff800000000000'u64.VirtAddr
-  KernelSpaceMaxAddress* = 0xffffffffffffffff'u64.VirtAddr
-  UserSpaceMinAddress* = 0x0000000000001000'u64.VirtAddr
-  UserSpaceMaxAddress* = 0x00007fffffffffff'u64.VirtAddr
+  KernelSpaceMinAddress* = 0xffff800000000000'u64.VAddr
+  KernelSpaceMaxAddress* = 0xffffffffffffffff'u64.VAddr
+  UserSpaceMinAddress* = 0x0000000000001000'u64.VAddr
+  UserSpaceMaxAddress* = 0x00007fffffffffff'u64.VAddr
 
 let
   logger = DebugLogger(name: "vmm")
@@ -45,7 +45,7 @@ var
   uspace*: VMAddressSpace
   kpml4*: ptr PML4Table
 
-template `end`*(region: VMRegion): VirtAddr =
+template `end`*(region: VMRegion): VAddr =
   region.start +! region.npages * PageSize
 
 proc getActivePML4*(): ptr PML4Table
@@ -65,34 +65,34 @@ proc vmInit*(physMemoryVirtualBase: uint64, physAlloc: PhysAlloc) =
   )
   kpml4 = getActivePML4()
 
-proc vmAddRegion*(space: var VMAddressSpace, start: VirtAddr, npages: uint64) =
+proc vmAddRegion*(space: var VMAddressSpace, start: VAddr, npages: uint64) =
   space.regions.add VMRegion(start: start, npages: npages)
 
 ####################################################################################################
 # Active PML4 utilities
 ####################################################################################################
 
-proc p2v*(phys: PhysAddr): VirtAddr
+proc p2v*(phys: PAddr): VAddr
 proc getActivePML4*(): ptr PML4Table =
   let cr3 = getCR3()
   result = cast[ptr PML4Table](p2v(cr3.pml4addr))
 
-proc v2p*(virt: VirtAddr): Option[PhysAddr]
+proc v2p*(virt: VAddr): Option[PAddr]
 proc setActivePML4*(pml4: ptr PML4Table) =
-  let cr3 = newCR3(pml4addr = v2p(cast[VirtAddr](pml4)).get)
+  let cr3 = newCR3(pml4addr = v2p(cast[VAddr](pml4)).get)
   setCR3(cr3)
 
 ####################################################################################################
 # Mapping between virtual and physical addresses
 ####################################################################################################
 
-proc p2v*(phys: PhysAddr): VirtAddr =
-  result = cast[VirtAddr](phys +! physicalMemoryVirtualBase)
+proc p2v*(phys: PAddr): VAddr =
+  result = cast[VAddr](phys +! physicalMemoryVirtualBase)
 
-proc v2p*(virt: VirtAddr, pml4: ptr PML4Table): Option[PhysAddr] =
+proc v2p*(virt: VAddr, pml4: ptr PML4Table): Option[PAddr] =
   if physicalMemoryVirtualBase == 0:
     # identity mapped
-    return some PhysAddr(cast[uint64](virt))
+    return some PAddr(cast[uint64](virt))
 
   var pml4Index = (virt.uint64 shr 39) and 0x1FF
   var pdptIndex = (virt.uint64 shr 30) and 0x1FF
@@ -100,26 +100,26 @@ proc v2p*(virt: VirtAddr, pml4: ptr PML4Table): Option[PhysAddr] =
   var ptIndex = (virt.uint64 shr 12) and 0x1FF
 
   if pml4[pml4Index].present == 0:
-    return none(PhysAddr)
+    return none(PAddr)
 
-  let pdptPhysAddr = PhysAddr(pml4[pml4Index].physAddress shl 12)
+  let pdptPhysAddr = PAddr(pml4[pml4Index].physAddress shl 12)
   let pdpt = cast[ptr PDPTable](p2v(pdptPhysAddr))
   if pdpt[pdptIndex].present == 0:
-    return none(PhysAddr)
+    return none(PAddr)
 
-  let pdPhysAddr = PhysAddr(pdpt[pdptIndex].physAddress shl 12)
+  let pdPhysAddr = PAddr(pdpt[pdptIndex].physAddress shl 12)
   let pd = cast[ptr PDTable](p2v(pdPhysAddr))
   if pd[pdIndex].present == 0:
-    return none(PhysAddr)
+    return none(PAddr)
 
-  let ptPhysAddr = PhysAddr(pd[pdIndex].physAddress shl 12)
+  let ptPhysAddr = PAddr(pd[pdIndex].physAddress shl 12)
   let pt = cast[ptr PTable](p2v(ptPhysAddr))
   if pt[ptIndex].present == 0:
-    return none(PhysAddr)
+    return none(PAddr)
 
-  result = some PhysAddr(pt[ptIndex].physAddress shl 12)
+  result = some PAddr(pt[ptIndex].physAddress shl 12)
 
-proc v2p*(virt: VirtAddr): Option[PhysAddr] =
+proc v2p*(virt: VAddr): Option[PAddr] =
   v2p(virt, getActivePML4())
 
 ####################################################################################################
@@ -127,9 +127,9 @@ proc v2p*(virt: VirtAddr): Option[PhysAddr] =
 ####################################################################################################
 
 proc getOrCreateEntry[P, C](parent: ptr P, index: uint64): ptr C =
-  var physAddr: PhysAddr
+  var physAddr: PAddr
   if parent[index].present == 1:
-    physAddr = PhysAddr(parent[index].physAddress shl 12)
+    physAddr = PAddr(parent[index].physAddress shl 12)
   else:
     physAddr = pmalloc(1)
     parent[index].physAddress = physAddr.uint64 shr 12
@@ -138,8 +138,8 @@ proc getOrCreateEntry[P, C](parent: ptr P, index: uint64): ptr C =
 
 proc mapPage(
   pml4: ptr PML4Table,
-  virtAddr: VirtAddr,
-  physAddr: PhysAddr,
+  virtAddr: VAddr,
+  physAddr: PAddr,
   pageAccess: PageAccess,
   pageMode: PageMode,
   noExec: bool = false,
@@ -176,7 +176,7 @@ proc mapPage(
   pt[ptIndex].user = mode
   pt[ptIndex].xd = noExec
 
-proc unmapPage*(pml4: ptr PML4Table, virtAddr: VirtAddr) =
+proc unmapPage*(pml4: ptr PML4Table, virtAddr: VAddr) =
   let pml4Index = (virtAddr.uint64 shr 39) and 0x1FF
   let pdptIndex = (virtAddr.uint64 shr 30) and 0x1FF
   let pdIndex = (virtAddr.uint64 shr 21) and 0x1FF
@@ -185,17 +185,17 @@ proc unmapPage*(pml4: ptr PML4Table, virtAddr: VirtAddr) =
   let pml4Entry = pml4[pml4Index]
   if pml4Entry.present == 0:
     return
-  let pdpt = cast[ptr PDPTable](p2v(PhysAddr(pml4Entry.physAddress shl 12)))
+  let pdpt = cast[ptr PDPTable](p2v(PAddr(pml4Entry.physAddress shl 12)))
 
   let pdptEntry = pdpt[pdptIndex]
   if pdptEntry.present == 0:
     return
-  let pd = cast[ptr PDTable](p2v(PhysAddr(pdptEntry.physAddress shl 12)))
+  let pd = cast[ptr PDTable](p2v(PAddr(pdptEntry.physAddress shl 12)))
 
   let pdEntry = pd[pdIndex]
   if pdEntry.present == 0:
     return
-  let pt = cast[ptr PTable](p2v(PhysAddr(pdEntry.physAddress shl 12)))
+  let pt = cast[ptr PTable](p2v(PAddr(pdEntry.physAddress shl 12)))
 
   var ptEntry = pt[ptIndex]
   if ptEntry.present == 0:
@@ -209,8 +209,8 @@ proc unmapPage*(pml4: ptr PML4Table, virtAddr: VirtAddr) =
 
 proc mapRegion*(
   pml4: ptr PML4Table,
-  virtAddr: VirtAddr,
-  physAddr: PhysAddr,
+  virtAddr: VAddr,
+  physAddr: PAddr,
   pageCount: uint64,
   pageAccess: PageAccess,
   pageMode: PageMode,
@@ -221,7 +221,7 @@ proc mapRegion*(
 
 proc mapRegion*(
   pml4: ptr PML4Table,
-  virtAddr: VirtAddr,
+  virtAddr: VAddr,
   pageCount: uint64,
   pageAccess: PageAccess,
   pageMode: PageMode,
@@ -232,17 +232,17 @@ proc mapRegion*(
 
 proc identityMapRegion*(
   pml4: ptr PML4Table,
-  physAddr: PhysAddr,
+  physAddr: PAddr,
   pageCount: uint64,
   pageAccess: PageAccess,
   pageMode: PageMode,
   noExec: bool = false,
 ) =
-  mapRegion(pml4, physAddr.VirtAddr, physAddr, pageCount, pageAccess, pageMode, noExec)
+  mapRegion(pml4, physAddr.VAddr, physAddr, pageCount, pageAccess, pageMode, noExec)
 
 proc unmapRegion*(
   pml4: ptr PML4Table,
-  virtAddr: VirtAddr,
+  virtAddr: VAddr,
   pageCount: uint64,
 ) =
   for i in 0 ..< pageCount:
@@ -274,7 +274,7 @@ proc vmmap*(
   pageAccess: PageAccess,
   pageMode: PageMode,
   noExec: bool = false,
-): PhysAddr {.discardable.} =
+): PAddr {.discardable.} =
   result = pmalloc(region.npages)
   mapRegion(pml4, region.start, result, region.npages, pageAccess, pageMode, noExec)
 
@@ -294,16 +294,16 @@ proc sar*(x: uint64, y: int): uint64 {.inline.} =
   result = x
 
 proc dumpPageTable*(pml4: ptr PML4Table) =
-  var virt: VirtAddr
-  var phys: PhysAddr
+  var virt: VAddr
+  var phys: PAddr
 
-  virt = cast[VirtAddr](pml4.entries.addr)
+  virt = cast[VAddr](pml4.entries.addr)
   debugln &"PML4: virt = {virt.uint64:#018x}"
   phys = v2p(virt).get
   debugln &"PML4: phys = {phys.uint64:#010x} (virt = {virt.uint64:#018x})"
   for pml4Index in 0 ..< 512.uint64:
     if pml4.entries[pml4Index].present == 1:
-      phys = PhysAddr(pml4.entries[pml4Index].physAddress shl 12)
+      phys = PAddr(pml4.entries[pml4Index].physAddress shl 12)
       virt = p2v(phys)
       var pml4mapped = pml4Index.uint64 shl (39 + 16)
       pml4mapped = sar(pml4mapped, 16)
@@ -311,14 +311,14 @@ proc dumpPageTable*(pml4: ptr PML4Table) =
       let pdpt = cast[ptr PDPTable](virt)
       for pdptIndex in 0 ..< 512:
         if pdpt.entries[pdptIndex].present == 1:
-          phys = PhysAddr(pdpt.entries[pdptIndex].physAddress shl 12)
+          phys = PAddr(pdpt.entries[pdptIndex].physAddress shl 12)
           virt = p2v(phys)
           let pdptmapped = pml4mapped or (pdptIndex.uint64 shl 30)
           debugln &"    [{pdptIndex:>03}] [{pdptmapped:#018x}]    PD: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pdpt.entries[pdptIndex].user} write={pdpt.entries[pdptIndex].write} nx={pdpt.entries[pdptIndex].xd}"
           let pd = cast[ptr PDTable](virt)
           for pdIndex in 0 ..< 512:
             if pd.entries[pdIndex].present == 1:
-              phys = PhysAddr(pd.entries[pdIndex].physAddress shl 12)
+              phys = PAddr(pd.entries[pdIndex].physAddress shl 12)
               # debugln &"  ptPhys = {phys.uint64:#010x}"
               virt = p2v(phys)
               # debugln &"  ptVirt = {virt.uint64:#018x}"
@@ -333,7 +333,7 @@ proc dumpPageTable*(pml4: ptr PML4Table) =
                      (pt.entries[ptIndex-1].xd != pt.entries[ptIndex].xd) or
                      (pt.entries[ptIndex+1].xd != pt.entries[ptIndex].xd)
                   ):
-                    phys = PhysAddr(pt.entries[ptIndex].physAddress shl 12)
+                    phys = PAddr(pt.entries[ptIndex].physAddress shl 12)
                     # debugln &"  pagePhys = {phys.uint64:#010x}"
                     virt = p2v(phys)
                     # debugln &"  pageVirt = {virt.uint64:#018x}"

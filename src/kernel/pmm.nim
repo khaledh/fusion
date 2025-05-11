@@ -13,7 +13,7 @@ type
     next: ptr PMNode
 
   PMRegion* = object
-    start*: PhysAddr
+    start*: PAddr
     nframes*: uint64
   
   InvalidRequest* = object of CatchableError
@@ -24,27 +24,27 @@ let
 
 var
   head: ptr PMNode
-  maxPhysAddr: PhysAddr # exclusive
+  maxPhysAddr: PAddr # exclusive
   physicalMemoryVirtualBase: uint64
   physicalMemoryPages: uint64
   reservedRegions: seq[PMRegion]
 
-proc toPhysAddr(p: ptr PMNode): PhysAddr {.inline.} =
-  result = PhysAddr(cast[uint64](p) - physicalMemoryVirtualBase)
+proc toPhysAddr(p: ptr PMNode): PAddr {.inline.} =
+  result = PAddr(cast[uint64](p) - physicalMemoryVirtualBase)
 
-proc toPMNodePtr(p: PhysAddr): ptr PMNode {.inline.} =
+proc toPMNodePtr(p: PAddr): ptr PMNode {.inline.} =
   result = cast[ptr PMNode](cast[uint64](p) + physicalMemoryVirtualBase)
 
-proc endAddr(paddr: PhysAddr, nframes: uint64): PhysAddr =
+proc endAddr(paddr: PAddr, nframes: uint64): PAddr =
   result = paddr +! nframes * FrameSize
 
-proc adjacent(node: ptr PMNode, paddr: PhysAddr): bool =
+proc adjacent(node: ptr PMNode, paddr: PAddr): bool =
   result = (
     not node.isNil and
     node.toPhysAddr +! node.nframes * FrameSize == paddr
   )
 
-proc adjacent(paddr: PhysAddr, nframes: uint64, node: ptr PMNode): bool =
+proc adjacent(paddr: PAddr, nframes: uint64, node: ptr PMNode): bool =
   result = (
     not node.isNil and
     paddr +! nframes * FrameSize == node.toPhysAddr
@@ -73,13 +73,13 @@ proc pmInit*(memoryMap: MemoryMap, physMemoryVirtualBase, physMemoryPages: uint6
   for i in 0 ..< memoryMap.len:
     let entry = memoryMap.entries[i]
     if entry.type == MemoryType.Free:
-      maxPhysAddr = endAddr(entry.start.PhysAddr, entry.nframes)
-      if not prev.isNil and adjacent(prev, entry.start.PhysAddr):
+      maxPhysAddr = endAddr(entry.start.PAddr, entry.nframes)
+      if not prev.isNil and adjacent(prev, entry.start.PAddr):
         # merge contiguous regions
         prev.nframes += entry.nframes
       else:
         # create a new node
-        var node: ptr PMNode = entry.start.PhysAddr.toPMNodePtr
+        var node: ptr PMNode = entry.start.PAddr.toPMNodePtr
         node.nframes = entry.nframes
         node.next = nil
 
@@ -91,26 +91,26 @@ proc pmInit*(memoryMap: MemoryMap, physMemoryVirtualBase, physMemoryPages: uint6
         prev = node
 
     elif entry.type == MemoryType.Reserved:
-      reservedRegions.add(PMRegion(start: entry.start.PhysAddr, nframes: entry.nframes))
+      reservedRegions.add(PMRegion(start: entry.start.PAddr, nframes: entry.nframes))
     
     elif i > 0:
       # check if there's a gap between the previous entry and the current entry
       let prevEntry = memoryMap.entries[i - 1]
-      let gap = entry.start.PhysAddr - endAddr(prevEntry.start.PhysAddr, prevEntry.nframes)
+      let gap = entry.start.PAddr - endAddr(prevEntry.start.PAddr, prevEntry.nframes)
       if gap > 0:
         reservedRegions.add(PMRegion(
-          start: endAddr(prevEntry.start.PhysAddr, prevEntry.nframes),
+          start: endAddr(prevEntry.start.PAddr, prevEntry.nframes),
           nframes: gap div FrameSize
         ))
 
-iterator pmFreeRegions*(): tuple[paddr: PhysAddr, nframes: uint64] =
+iterator pmFreeRegions*(): tuple[paddr: PAddr, nframes: uint64] =
   ## Iterate over all physical memory regions.
   var node = head
   while not node.isNil:
     yield (node.toPhysAddr, node.nframes)
     node = node.next
 
-proc pmAlloc*(nframes: uint64): PhysAddr =
+proc pmAlloc*(nframes: uint64): PAddr =
   ## Allocate a contiguous region of physical memory.
   assert nframes > 0, "Number of frames must be positive"
 
@@ -145,7 +145,7 @@ proc pmAlloc*(nframes: uint64): PhysAddr =
   zeroMem(curr, nframes * FrameSize)
   result = curr.toPhysAddr
 
-proc pmFree*(paddr: PhysAddr, nframes: uint64) =
+proc pmFree*(paddr: PAddr, nframes: uint64) =
   ## Free a contiguous region of physical memory.
   if paddr.uint64 mod FrameSize != 0:
     raise newException(InvalidRequest, &"Unaligned physical address: {paddr.uint64:#x}")

@@ -43,9 +43,9 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
 
   logger.info "init vmm"
   vmInit(bootInfo.physicalMemoryVirtualBase, pmm.pmAlloc)
-  vmAddRegion(kspace, bootInfo.physicalMemoryVirtualBase.VirtAddr, bootInfo.physicalMemoryPages)
-  vmAddRegion(kspace, bootInfo.kernelImageVirtualBase.VirtAddr, bootInfo.kernelImagePages)
-  vmAddRegion(kspace, bootInfo.kernelStackVirtualBase.VirtAddr, bootInfo.kernelStackPages)
+  vmAddRegion(kspace, bootInfo.physicalMemoryVirtualBase.VAddr, bootInfo.physicalMemoryPages)
+  vmAddRegion(kspace, bootInfo.kernelImageVirtualBase.VAddr, bootInfo.kernelImagePages)
+  vmAddRegion(kspace, bootInfo.kernelStackVirtualBase.VAddr, bootInfo.kernelStackPages)
 
   logger.info "init gdt"
   gdtInit()
@@ -94,12 +94,12 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.info &"creaeting two user tasks"
 
   var utask1 = createUserTask(
-    imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
+    imagePhysAddr = bootInfo.userImagePhysicalBase.PAddr,
     imagePageCount = bootInfo.userImagePages,
     name = "utask1",
   )
   var utask2 = createUserTask(
-    imagePhysAddr = bootInfo.userImagePhysicalBase.PhysAddr,
+    imagePhysAddr = bootInfo.userImagePhysicalBase.PAddr,
     imagePageCount = bootInfo.userImagePages,
     name = "utask2",
   )

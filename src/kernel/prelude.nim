@@ -19,8 +19,8 @@ template orRaise*[T](opt: Option[T], exc: ref Exception): T =
 
 # Virtual address, Physical address, pointers, etc.
 type
-  VirtAddr* = distinct uint64
-  PhysAddr* = distinct uint64
+  VAddr* = distinct uint64
+  PAddr* = distinct uint64
 
 const
   KiB* = 1024'u64
@@ -31,35 +31,35 @@ const
 
 # virtual address operations
 
-template `+!`*(p: VirtAddr, offset: uint64): VirtAddr = VirtAddr(cast[uint64](p) + offset)
-template `-!`*(p: VirtAddr, offset: uint64): VirtAddr = VirtAddr(cast[uint64](p) - offset)
+template `+!`*(p: VAddr, offset: uint64): VAddr = VAddr(cast[uint64](p) + offset)
+template `-!`*(p: VAddr, offset: uint64): VAddr = VAddr(cast[uint64](p) - offset)
 
-template `+!`*(p: VirtAddr, offset: int64): VirtAddr = VirtAddr(cast[uint64](p) + offset)
-template `-!`*(p: VirtAddr, offset: int64): VirtAddr =
+template `+!`*(p: VAddr, offset: int64): VAddr = VAddr(cast[uint64](p) + offset)
+template `-!`*(p: VAddr, offset: int64): VAddr =
   if offset < 0:
-    VirtAddr(p.uint64 - abs(offset).uint64)
+    VAddr(p.uint64 - abs(offset).uint64)
   else:
     p +! offset.uint64
 
-template `-!`*(p1: VirtAddr, p2: VirtAddr): uint64 = p1.uint64 - p2.uint64
+template `-!`*(p1: VAddr, p2: VAddr): uint64 = p1.uint64 - p2.uint64
 
-template `==`*(a: VirtAddr, b: VirtAddr): bool =  a.uint64 == b.uint64
-template `<`*(a: VirtAddr, b: VirtAddr): bool =  a.uint64 < b.uint64
-template `<=`*(a: VirtAddr, b: VirtAddr): bool =  a.uint64 <= b.uint64
+template `==`*(a: VAddr, b: VAddr): bool =  a.uint64 == b.uint64
+template `<`*(a: VAddr, b: VAddr): bool =  a.uint64 < b.uint64
+template `<=`*(a: VAddr, b: VAddr): bool =  a.uint64 <= b.uint64
 
 # physical address operations
 
-template `+!`*(p: PhysAddr, offset: uint64): PhysAddr =
-  PhysAddr(cast[uint64](p) + offset)
+template `+!`*(p: PAddr, offset: uint64): PAddr =
+  PAddr(cast[uint64](p) + offset)
 
-template `-!`*(p: PhysAddr, offset: uint64): PhysAddr =
-  PhysAddr(cast[uint64](p) - offset)
+template `-!`*(p: PAddr, offset: uint64): PAddr =
+  PAddr(cast[uint64](p) - offset)
 
-template `-!`*(p1: PhysAddr, p2: PhysAddr): uint64 = p1.uint64 - p2.uint64
+template `-!`*(p1: PAddr, p2: PAddr): uint64 = p1.uint64 - p2.uint64
 
-template `==`*(p1, p2: PhysAddr): bool = p1.uint64 == p2.uint64
-template `<`*(p1, p2: PhysAddr): bool = p1.uint64 < p2.uint64
-template `-`*(p1, p2: PhysAddr): uint64 = p1.uint64 - p2.uint64
+template `==`*(p1, p2: PAddr): bool = p1.uint64 == p2.uint64
+template `<`*(p1, p2: PAddr): bool = p1.uint64 < p2.uint64
+template `-`*(p1, p2: PAddr): uint64 = p1.uint64 - p2.uint64
 
 
 # pointer operations

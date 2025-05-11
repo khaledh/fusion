@@ -84,7 +84,7 @@ proc create*(msgSize: int, msgCapacity: int = DefaultMessageCapacity): Channel =
     pageMode = pmUser,
     noExec = true
   )
-  let buffStartVirt = cast[VirtAddr](buffRegion.start)
+  let buffStartVirt = cast[VAddr](buffRegion.start)
   let buffStartPhys = v2p(buffStartVirt).get
 
   result = Channel(
@@ -110,7 +110,7 @@ proc open*(chid: int, task: Task, mode: ChannelMode): int =
   let numPages = (ch.buffer.cap + PageSize - 1) div PageSize
   let pageAccess = if mode == ChannelMode.Read: paRead else: paReadWrite
 
-  let buffStartVirt = cast[VirtAddr](buffStart)
+  let buffStartVirt = cast[VAddr](buffStart)
   let buffStartPhys = v2p(buffStartVirt, kpml4).get
   mapRegion(
     pml4 = task.pml4,
@@ -134,7 +134,7 @@ proc close*(chid: int, task: Task): int =
   let numPages = (ch.buffer.cap + PageSize - 1) div PageSize
   unmapRegion(
     pml4 = task.pml4,
-    virtAddr = cast[VirtAddr](buffStart),
+    virtAddr = cast[VAddr](buffStart),
     pageCount = numPages.uint64
   )
   logger.info &"close: closed channel id {chid} for task {task.id}"

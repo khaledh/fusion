@@ -229,11 +229,11 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
   let physMemoryMap = convertUefiMemoryMap(memoryMap, memoryMapSize, memoryMapDescriptorSize)
 
   # get max free physical memory address
-  var maxPhysAddr: PhysAddr
-  var currEndPhysAddr, prevEndPhysAddr: PhysAddr = 0.PhysAddr
+  var maxPhysAddr: PAddr
+  var currEndPhysAddr, prevEndPhysAddr: PAddr = 0.PAddr
   for i in 0 ..< physMemoryMap.len:
-    currEndPhysAddr = physMemoryMap[i].start.PhysAddr +! physMemoryMap[i].nframes * PageSize
-    if physMemoryMap[i].start.PhysAddr == prevEndPhysAddr  or prevEndPhysAddr == 0xa0000.PhysAddr: # 384 KiB gap ok:
+    currEndPhysAddr = physMemoryMap[i].start.PAddr +! physMemoryMap[i].nframes * PageSize
+    if physMemoryMap[i].start.PAddr == prevEndPhysAddr  or prevEndPhysAddr == 0xa0000.PAddr: # 384 KiB gap ok:
       # contiguous memory, update maxPhysAddr
       maxPhysAddr = currEndPhysAddr
       prevEndPhysAddr = currEndPhysAddr
@@ -526,8 +526,8 @@ proc createPageTable(
   physMemoryPages: uint64,
 ): ptr PML4Table =
 
-  proc bootAlloc(nframes: uint64): PhysAddr =
-    result = cast[PhysAddr](new AlignedPage)
+  proc bootAlloc(nframes: uint64): PAddr =
+    result = cast[PAddr](new AlignedPage)
 
   # initialize vmm using identity-mapped physical memory
   vmInit(physMemoryVirtualBase = 0'u64, physAlloc = bootAlloc)
@@ -538,35 +538,35 @@ proc createPageTable(
   # identity-map bootloader image
   logger.info &"""  {"Identity-mapping bootloader\:":<30} base={bootloaderPhysicalBase:#010x}, pages={bootloaderPages}"""
   identityMapRegion(
-    pml4, bootloaderPhysicalBase.PhysAddr, bootloaderPages.uint64,
+    pml4, bootloaderPhysicalBase.PAddr, bootloaderPages.uint64,
     paReadWrite, pmSupervisor
   )
 
   # identity-map boot info
   logger.info &"""  {"Identity-mapping BootInfo\:":<30} base={bootInfoPhysicalBase:#010x}, pages={bootInfoPages}"""
   identityMapRegion(
-    pml4, bootInfoPhysicalBase.PhysAddr, bootInfoPages,
+    pml4, bootInfoPhysicalBase.PAddr, bootInfoPages,
     paReadWrite, pmSupervisor
   )
 
   # map all physical memory; assume 128 MiB of physical memory
   logger.info &"""  {"Mapping physical memory\:":<30} base={PhysicalMemoryVirtualBase:#010x}, pages={physMemoryPages}"""
   mapRegion(
-    pml4, PhysicalMemoryVirtualBase.VirtAddr, 0.PhysAddr, physMemoryPages,
+    pml4, PhysicalMemoryVirtualBase.VAddr, 0.PAddr, physMemoryPages,
     paReadWrite, pmSupervisor
   )
 
   # map kernel to higher half
   logger.info &"""  {"Mapping kernel to higher half\:":<30} base={KernelImageVirtualBase:#010x}, pages={kernelImagePages}"""
   mapRegion(
-    pml4, KernelImageVirtualBase.VirtAddr, kernelImagePhysicalBase.PhysAddr, kernelImagePages,
+    pml4, KernelImageVirtualBase.VAddr, kernelImagePhysicalBase.PAddr, kernelImagePages,
     paReadWrite, pmSupervisor
   )
 
   # map kernel stack
   logger.info &"""  {"Mapping kernel stack\:":<30} base={KernelStackVirtualBase:#010x}, pages={kernelStackPages}"""
   mapRegion(
-    pml4, KernelStackVirtualBase.VirtAddr, kernelStackPhysicalBase.PhysAddr, kernelStackPages,
+    pml4, KernelStackVirtualBase.VAddr, kernelStackPhysicalBase.PAddr, kernelStackPages,
     paReadWrite, pmSupervisor
   )
 

@@ -175,8 +175,8 @@ proc setCR3*(cr3: CR3) {.inline.} =
     : "r15"
   """
 
-proc newCR3*(pml4addr: PhysAddr): CR3 {.inline.} =
+proc newCR3*(pml4addr: PAddr): CR3 {.inline.} =
   result = CR3(physAddress: pml4addr.uint64 shr 12)
 
-proc pml4addr*(cr3: CR3): PhysAddr {.inline.} =
-  result = PhysAddr(cr3.physAddress shl 12)
+proc pml4addr*(cr3: CR3): PAddr {.inline.} =
+  result = PAddr(cr3.physAddress shl 12)

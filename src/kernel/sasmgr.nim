@@ -29,23 +29,23 @@
 
 type
   AddressSpacePartition* = object
-    base*: VirtAddr
-    limit*: VirtAddr
+    base*: VAddr
+    limit*: VAddr
 
   ASRegion* = object
-    base*: VirtAddr
+    base*: VAddr
     npages*: uint64
 
   OutOfAddressSpaceError* = object of CatchableError
 
 const
   uspace* = AddressSpacePartition(
-    base: 0x0000000000000000'u64.VirtAddr,
-    limit: 0x00007fffffffffff'u64.VirtAddr,
+    base: 0x0000000000000000'u64.VAddr,
+    limit: 0x00007fffffffffff'u64.VAddr,
   )
   kspace* = AddressSpacePartition(
-    base: 0xffff800000000000'u64.VirtAddr,
-    limit: 0xffffffffffffffff'u64.VirtAddr,
+    base: 0xffff800000000000'u64.VAddr,
+    limit: 0xffffffffffffffff'u64.VAddr,
   )
 
 # Keep it simple for now and use a simple bump allocator.
@@ -53,24 +53,24 @@ var
   ksnext = kspace.base
   usnext = uspace.base
 
-proc ksalloc*(npages: uint64): VirtAddr =
+proc ksalloc*(npages: uint64): VAddr =
   ## Allocate a region of memory in the kernel space.
   if (kspace.limit -! ksnext) < (npages * PageSize):
     raise newException(OutOfAddressSpaceError, "Out of kernel address space")
   result = ksnext
   ksnext = ksnext +! npages * PageSize
 
-proc usalloc*(npages: uint64): VirtAddr =
+proc usalloc*(npages: uint64): VAddr =
   ## Allocate a region of memory in the user space.
   if (uspace.limit -! usnext) < (npages * PageSize):
     raise newException(OutOfAddressSpaceError, "Out of user address space")
   result = usnext
   usnext = usnext +! npages * PageSize
 
-proc ksfree*(base: VirtAddr) =
+proc ksfree*(base: VAddr) =
   ## Free a region of memory in the kernel space.
   discard
 
-proc usfree*(base: VirtAddr) =
+proc usfree*(base: VAddr) =
   ## Free a region of memory in the user space.
   discard

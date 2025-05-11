@@ -62,7 +62,7 @@ var
 
 proc initBaseAddress() =
   let apicBaseMsr = cast[IA32ApicBaseMsr](readMSR(IA32_APIC_BASE))
-  let apicPhysAddr = (apicBaseMsr.baseAddress shl 12).PhysAddr
+  let apicPhysAddr = (apicBaseMsr.baseAddress shl 12).PAddr
   # by definition, apicPhysAddr is aligned to a page boundary, so we map it directly
   let apicVMRegion = vmalloc(kspace, 1)
   mapRegion(

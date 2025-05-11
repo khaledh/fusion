@@ -81,7 +81,7 @@ proc createStack*(
 #
 
 proc createUserTask*(
-  imagePhysAddr: PhysAddr,
+  imagePhysAddr: PAddr,
   imagePageCount: uint64,
   name: string = "",
   priority: TaskPriority = 0

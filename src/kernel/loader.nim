@@ -34,7 +34,7 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
       let startPage = ph.vaddr - startOffset
       let numPages = (startOffset + ph.memsz + PageSize - 1) div PageSize
       let region = VMRegion(
-        start: startPage.VirtAddr,
+        start: startPage.VAddr,
         npages: numPages,
         flags: cast[VMRegionFlags](ph.flags),
       )

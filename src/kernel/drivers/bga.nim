@@ -93,7 +93,7 @@ proc mapFramebuffer*(width, height: uint32): tuple[virtAddr: uint64, numPages: u
   mapRegion(
     pml4 = getActivePML4(),
     virtAddr = vmRegion.start,
-    physAddr = fbPhysAddr.PhysAddr,
+    physAddr = fbPhysAddr.PAddr,
     pageCount = numPages,
     pageAccess = paReadWrite,
     pageMode = pmSupervisor,
@@ -104,7 +104,7 @@ proc mapFramebuffer*(width, height: uint32): tuple[virtAddr: uint64, numPages: u
 proc unmapFramebuffer*(virtAddr, numPages: uint64) =
     unmapRegion(
       pml4 = getActivePML4(),
-      virtAddr = virtAddr.VirtAddr,
+      virtAddr = virtAddr.VAddr,
       pageCount = numPages,
     )
 
