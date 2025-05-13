@@ -148,12 +148,14 @@ proc getOrCreateEntry[T, E](table: ptr T, index: uint64): ptr E =
 
 proc mapIntoPageTable*(pml4: ptr PML4Table, mapping: VmMapping) =
   ## Update the page table for a given mapping.
+  if mapping.paddr.isNone and mapping.vmo.isNil:
+    raise newException(VmError, "Mapping requires either a physical address or a backing VmObject")
+
   var paddrCurr = mapping.paddr
-  var vaddrCurr = mapping.vaddr
-  var vaddrEnd = vaddrCurr +! mapping.size
+  var vaddrCurr = mapping.region.start
+  var vaddrEnd = vaddrCurr +! mapping.region.size
 
   let
-    present: uint64 = if mapping.paddr.isSome: 1 else: 0
     write: uint64 = if pWrite in mapping.permissions: 1 else: 0
     noExec: uint64 = if pExecute in mapping.permissions: 0 else: 1
     user: uint64 = if mapping.privilege == pUser: 1 else: 0
@@ -202,7 +204,6 @@ proc mapIntoPageTable*(pml4: ptr PML4Table, mapping: VmMapping) =
 
     # Page Table
     if index.pti != prevIndex.pti:
-      pt[index.pti].present = present
       pt[index.pti].write = write
       pt[index.pti].user = user
       pt[index.pti].xd = noExec
@@ -210,16 +211,20 @@ proc mapIntoPageTable*(pml4: ptr PML4Table, mapping: VmMapping) =
       prevIndex.pti = index.pti
 
       if paddrCurr.isSome:
+        pt[index.pti].present = 1
         pt[index.pti].paddr = paddrCurr.get
         inc(paddrCurr.get, PageSize)
+      else:
+        pt[index.pti].present = 0
+        pt[index.pti].paddr = mapping.vmo.id  # used by the page fault handler to find the VMO
 
     inc(vaddrCurr, PageSize)
 
 
 proc unmapFromPageTable*(pml4: ptr PML4Table, mapping: VmMapping) =
   ## Remove a mapping from the page table.
-  var vaddrCurr = mapping.vaddr
-  var vaddrEnd = vaddrCurr +! mapping.size
+  var vaddrCurr = mapping.region.start
+  var vaddrEnd = vaddrCurr +! mapping.region.size
 
   while vaddrCurr < vaddrEnd:
     var idx = vaddrToIndex(vaddrCurr)

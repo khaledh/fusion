@@ -13,6 +13,7 @@ type
     data*: ptr UncheckedArray[uint64]
     size*: uint64
     bottom*: uint64
+    vmMapping*: VmMapping
 
   Task* = ref object
     rsp*: uint64  # must be first field (inline assembly in ctxswitch expects this)
@@ -23,7 +24,7 @@ type
     remainingQuantumMs*: uint64 = InitialQuantumMs
     sleepUntil*: uint64  # based on apic timer count
     # user task fields
-    vmRegions*: seq[VMRegion]
+    vmRegions*: seq[vmm.VMRegion]
     vmMappings*: seq[VmMapping]
     pml4*: ptr PML4Table
     ustack*: TaskStack

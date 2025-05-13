@@ -5,27 +5,28 @@
 import std/algorithm
 
 import common/pagetables
-import vmm
+import vmm, vmdefs, vmmgr
 
 include elf
 
 type
   LoadedElfImage* = object
-    vmRegion*: VMRegion
+    vmRegion*: vmm.VMRegion
     entryPoint*: pointer
-  
+    vmMappings*: seq[VmMapping]
+
   LoaderError* = object of CatchableError
 
 
 proc applyRelocations(image: ptr UncheckedArray[byte], dynOffset: uint64)
 
-proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
+proc load*(imagePtr: pointer, pml4, newpml4: ptr PML4Table): LoadedElfImage =
   let image = initElfImage(imagePtr)
 
   var dynOffset: int = -1
 
   # get a list of page-aligned memory regions to be mapped
-  var vmRegions: seq[VMRegion] = @[]
+  var vmRegions: seq[vmm.VMRegion] = @[]
   for (i, ph) in segments(image):
     if ph.type == ElfProgramHeaderType.Load:
       if ph.align != PageSize:
@@ -33,10 +34,10 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
       let startOffset = ph.vaddr mod PageSize
       let startPage = ph.vaddr - startOffset
       let numPages = (startOffset + ph.memsz + PageSize - 1) div PageSize
-      let region = VMRegion(
+      let region = vmm.VMRegion(
         start: startPage.VAddr,
         npages: numPages,
-        flags: cast[VMRegionFlags](ph.flags),
+        flags: cast[vmm.VMRegionFlags](ph.flags),
       )
       vmRegions.add(region)
     elif ph.type == ElfProgramHeaderType.Dynamic:
@@ -67,10 +68,28 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
 
   # map each region into the page tables, making sure to set the R/W and NX flags as needed
   # debugln "loader: Mapping user image"
+  var mappings: seq[VmMapping]
   for region in vmRegions:
     let access = if region.flags.contains(Write): paReadWrite else: paRead
     let noExec = not region.flags.contains(Execute)
     let physAddr = vmmap(region, pml4, access, pmUser, noExec)
+
+    # ############################################################
+    # # new vm subsystem
+    var perms = {pRead}
+    if access == paReadWrite:
+      perms.incl(pWrite)
+    if not noExec:
+      perms.incl(pExecute)
+    let mapping = uvMap(
+      pml4 = newpml4,
+      npages = region.npages,
+      perms = perms,
+      flags = {vmPrivate},
+    )
+    mappings.add(mapping)
+    # ############################################################
+
     # temporarily map the region in kernel space so that we can copy the segments and apply relocations
     mapRegion(
       pml4 = kpml4,
@@ -109,7 +128,8 @@ proc load*(imagePtr: pointer, pml4: ptr PML4Table): LoadedElfImage =
 
   result = LoadedElfImage(
     vmRegion: taskRegion,
-    entryPoint: cast[pointer](taskRegion.start +! image.header.entry)
+    entryPoint: cast[pointer](taskRegion.start +! image.header.entry),
+    vmMappings: mappings,
   )
   # debugln &"loader: Entry point: {cast[uint64](result.entryPoint):#x}"
 

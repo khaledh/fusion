@@ -12,6 +12,7 @@ import sched
 import timer
 import task
 import vmm
+import vmdefs, vmmgr, vmpgtbl
 
 
 let
@@ -38,8 +39,9 @@ proc iretq*() {.asmNoStackFrame.} =
   asm "iretq"
 
 proc createStack*(
-  vmRegions: var seq[VMRegion],
+  vmRegions: var seq[vmm.VMRegion],
   pml4: ptr PML4Table,
+  newpml4: ptr PML4Table,
   space: var VMAddressSpace,
   npages: uint64,
   mode: PageMode
@@ -47,6 +49,27 @@ proc createStack*(
   let stackRegion = vmalloc(space, npages)
   vmmap(stackRegion, pml4, paReadWrite, mode, noExec = true)
   vmRegions.add(stackRegion)
+
+  # ############################################################
+  # ## new vm subsystem
+  # ## map the stack into the task's page table
+  if mode == pmUser:
+    let mapping = uvMap(
+      pml4 = newpml4,
+      npages = npages,
+      perms = {pRead, pWrite},
+      flags = {vmPrivate},
+    )
+    result.vmMapping = mapping
+  else:
+    let mapping = kvMap(
+      npages = npages,
+      perms = {pRead, pWrite},
+      flags = {vmPrivate},
+    )
+    result.vmMapping = mapping
+  # ############################################################
+
   result.data = cast[ptr UncheckedArray[uint64]](stackRegion.start)
   result.size = npages * PageSize
   result.bottom = cast[uint64](result.data) + result.size
@@ -87,12 +110,13 @@ proc createUserTask*(
   priority: TaskPriority = 0
 ): Task =
 
-  var vmRegions = newSeq[VMRegion]()
+  var vmRegions = newSeq[vmm.VMRegion]()
   var pml4 = cast[ptr PML4Table](new PML4Table)
+  var newpml4 = newPageTable()
 
   logger.info &"loading task from ELF image"
-  let imagePtr = cast[pointer](p2v(imagePhysAddr))
-  let loadedImage = load(imagePtr, pml4)
+  let imagePtr = cast[pointer](vmm.p2v(imagePhysAddr))
+  let loadedImage = load(imagePtr, pml4, newpml4)
   vmRegions.add(loadedImage.vmRegion)
   logger.info &"loaded task at: {loadedImage.vmRegion.start.uint64:#x}"
 
@@ -103,8 +127,8 @@ proc createUserTask*(
 
   # create user and kernel stacks
   # logger.info &"creating task stacks"
-  let ustack = createStack(vmRegions, pml4, uspace, 1, pmUser)
-  let kstack = createStack(vmRegions, pml4, kspace, 1, pmSupervisor)
+  let ustack = createStack(vmRegions, pml4, newpml4, uspace, 1, pmUser)
+  let kstack = createStack(vmRegions, pml4, newpml4, kspace, 1, pmSupervisor)
 
   # create stack frame
 
@@ -126,7 +150,6 @@ proc createUserTask*(
   let regsAddr = iretqPtrAddr - sizeof(TaskRegs).uint64
   var regs = cast[ptr TaskRegs](regsAddr)
   zeroMem(regs, sizeof(TaskRegs))
-  regs.rdi = 5050
 
   let taskId = nextTaskId
   inc nextTaskId
@@ -143,6 +166,11 @@ proc createUserTask*(
     state: TaskState.New,
     isUser: true,
   )
+  ############################################################
+  # new vm subsystem
+  result.vmMappings.add(loadedImage.vmMappings)
+  result.vmMappings.add(ustack.vmMapping)
+  ############################################################
 
   tasks.add(result)
 
@@ -160,11 +188,11 @@ proc kernelTaskWrapper*(kproc: KernelProc) =
 
 proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPriority = 0): Task =
 
-  var vmRegions = newSeq[VMRegion]()
+  var vmRegions = newSeq[vmm.VMRegion]()
   var pml4 = getActivePML4()
 
   logger.info &"creating kernel task \"{name}\""
-  let kstack = createStack(vmRegions, pml4, kspace, 1, pmSupervisor)
+  let kstack = createStack(vmRegions, pml4, newkpml4, kspace, 1, pmSupervisor)
 
   # create stack frame
 

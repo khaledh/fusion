@@ -1,11 +1,32 @@
 import std/tables
 
-type
-  ######################## VmObject Definitions ########################
+import freelist
 
+######################## VmSpace Definitions ########################
+
+type
+  VmSpace* = object
+    ## A disjoint part of the virtual memory address space.
+    base*: VAddr    ## Base address of the space
+    limit*: VAddr   ## Limit address of the space
+
+  VmRegion* = object
+    ## A contiguous region of virtual memory allocated within a space.
+    slice*: AllocatedSlice  # private (see `start` and `npages` public templates)
+  
+proc size*(space: VmSpace): uint64 {.inline.} = space.limit -! space.base + 1
+
+template start*(region: VmRegion): VAddr = region.slice.start.VAddr
+template `end`*(region: VmRegion): VAddr = region.slice.end.VAddr
+template npages*(region: VmRegion): uint64 = region.slice.size div PageSize
+template size*(region: VmRegion): uint64 = region.slice.size
+
+######################## VmObject Definitions ########################
+
+type
   VmObject* = ref object of RootObj
     ## A virtual memory object that can be mapped into a region of virtual memory.
-    id*: int                        ## Unique identifier
+    id*: uint64                     ## Unique identifier
     size*: uint64                   ## Memory size of the object (page aligned)
 
   PinnedVmObject* = ref object of VmObject
@@ -20,17 +41,18 @@ type
     pager*: VmObjectPagerProc       ## Pager procedure for the object
 
   VmObjectPagerProc* = proc(
-    vmobj: VmObject,  ## The VmObject
-    offset: uint64,   ## Offset of the page in the VmObject
-    npages: uint64,   ## Number of pages to page in (typically 1, but can be more for prefetching)
+    vmobj: PageableVmObject,  ## The VmObject
+    offset: uint64,           ## Offset of the page in the VmObject
+    npages: uint64,           ## Number of pages to page in (typically 1, but can be more for prefetching)
   ): PAddr
     ## Pager procedure for a VmObject.
     ##
     ## This procedure is called when a page of the VmObject is accessed but not present in memory.
     ## It should load/allocate the page(s) into physical memory and return its physical address.
 
-  ######################## Mapping Definitions ########################
+####################### VmMapping Definitions #######################
 
+type
   VmPermission* = enum
     pRead
     pWrite
@@ -56,9 +78,8 @@ type
 
   VmMapping* = object
     ## Describes how a VmObject is mapped into a particular task's address space.
-    vaddr*: VAddr                ## The base virtual address of the mapping
+    region*: VmRegion            ## The region of virtual memory being mapped
     paddr*: Option[PAddr]        ## The base physical address of the mapping (if pre-allocated)
-    size*: uint64                ## The size of the mapping
 
     # The source of data
     vmo*: VmObject               ## Reference to the VmObject being mapped
@@ -71,3 +92,10 @@ type
     osdata*: VmOsData            ## OS-specific data for the mapping
 
 proc value*(osdata: VmOsData): uint64 = cast[uint64](osdata)
+
+#################################### Errors ####################################
+
+type
+  VmError* = object of CatchableError
+  OutOfVirtualMemoryError* = object of VmError
+    ## An error raised when a region of virtual memory cannot be allocated.

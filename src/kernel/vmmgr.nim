@@ -5,7 +5,7 @@
 ]#
 
 import common/pagetables
-import vmdefs, vmpgtbl, vmobject, vmspace, vmm
+import vmdefs, vmpgtbl, vmobject, vmspace
 import task
 
 let
@@ -13,15 +13,24 @@ let
 
 var
   pmBase = 0.Vaddr  ## Base virtual address of physical memory direct map
-  kpml4: ptr PML4Table
+  newkpml4*: ptr PML4Table
 
+####################################################################################################
 # Forward declarations
+####################################################################################################
+
+proc kvMap*(
+  npages: uint64,
+  perms: VmPermissions,
+  flags: VmMappingFlags,
+): VmMapping
+
 proc kvMapAt*(
   vaddr: VAddr,
   npages: uint64,
   perms: VmPermissions,
   flags: VmMappingFlags,
-)
+): VmMapping
 
 proc kvMapAt*(
   vaddr: VAddr,
@@ -29,7 +38,18 @@ proc kvMapAt*(
   npages: uint64,
   perms: VmPermissions,
   flags: VmMappingFlags,
-)
+): VmMapping
+
+proc uvMap*(
+  pml4: ptr PML4Table,
+  npages: uint64,
+  perms: VmPermissions,
+  flags: VmMappingFlags,
+): VmMapping
+
+####################################################################################################
+# Initialization
+####################################################################################################
 
 proc vmmgrInit*(
   kernelImageVirtualBase: VAddr,
@@ -40,12 +60,10 @@ proc vmmgrInit*(
   kernelStackPages: uint64,
 ) =
   # Create the kernel page table
-  logger.info "  creating kernel page table"
-  kpml4 = newPageTable()
+  newkpml4 = newPageTable()
   
   # Map the kernel image
-  logger.info "  mapping kernel image"
-  kvMapAt(
+  discard kvMapAt(
     vaddr = kernelImageVirtualBase,
     paddr = kernelImagePhysicalBase,
     npages = kernelImagePages,
@@ -53,8 +71,7 @@ proc vmmgrInit*(
     flags = {vmPinned, vmPrivate},
   )
   # Map the kernel stack
-  logger.info "  mapping kernel stack"
-  kvMapAt(
+  discard kvMapAt(
     vaddr = kernelStackVirtualBase,
     paddr = kernelStackPhysicalBase,
     npages = kernelStackPages,
@@ -68,8 +85,7 @@ proc createDirectMapping*(
 ) =
   ## Creates a direct mapping of the physical memory at the given virtual address.
   pmBase = physMemoryVirtualBase
-  logger.info "  mapping physical memory"
-  kvMapAt(
+  discard kvMapAt(
     vaddr = physMemoryVirtualBase,
     paddr = 0.PAddr,
     npages = physMemoryPages,
@@ -112,67 +128,94 @@ proc v2p*(vaddr: VAddr): Option[PAddr] =
 # Map a new region of memory into a task's address space
 ####################################################################################################
 
-proc kvMapAt*(
-  vaddr: VAddr,
-  paddr: PAddr,
+### Kernel mappings
+
+proc kvMap*(
   npages: uint64,
   perms: VmPermissions,
   flags: VmMappingFlags,
-) =
+): VmMapping =
+  ## Map a new region of memory into the kernel's address space.
   let size = npages * PageSize
-  discard vmspace.kvreserve(vaddr, size)  # TODO: store the region
-  let vmo = newPinnedVmObject(paddr, size)
+  let region = ksAlloc(npages)  # TODO: store the region
+  let vmo = newAnonymousVmObject(size)
   let mapping = VmMapping(
-    vaddr: vaddr,
-    paddr: some paddr,
-    size: size,
+    region: region,
     vmo: vmo,
     offset: 0,
     permissions: perms,
     privilege: pSupervisor,
     flags: flags,
   )
-  mapIntoPageTable(kpml4, mapping)
+  mapIntoPageTable(newkpml4, mapping)
+  result = mapping
 
 proc kvMapAt*(
   vaddr: VAddr,
   npages: uint64,
   perms: VmPermissions,
   flags: VmMappingFlags,
-) =
+): VmMapping =
+  ## Map a new region of memory into the kernel's address space at the given virtual address.
   let size = npages * PageSize
-  discard vmspace.kvreserve(vaddr, size)  # TODO: store the region
-  let vmo = newAnonymousVmObject(size)
-  mapIntoPageTable(
-    kpml4,
-    VmMapping(
-      vaddr: vaddr,
-      size: size,
-      vmo: vmo,
-      offset: 0,
-      permissions: perms,
-      privilege: pSupervisor,
-      flags: flags,
-    )
-  )
-
-proc vMap*(task: Task, npages: uint64, perms: VmPermissions) =
-  ## Map a new region of memory into a task's address space.
-  let size = npages * PageSize
-  let vmr = vmspace.uvalloc(npages)
+  let region = ksAllocAt(vaddr, npages)  # TODO: store the region
   let vmo = newAnonymousVmObject(size)
   let mapping = VmMapping(
-    vaddr: vmr.base,
-    size: size,
+    region: region,
+    vmo: vmo,
+    offset: 0,
+    permissions: perms,
+    privilege: pSupervisor,
+    flags: flags,
+  )
+  mapIntoPageTable(newkpml4, mapping)
+  result = mapping
+
+proc kvMapAt*(
+  vaddr: VAddr,
+  paddr: PAddr,
+  npages: uint64,
+  perms: VmPermissions,
+  flags: VmMappingFlags,
+): VmMapping =
+  ## Map a new region of memory into the kernel's address space at the given virtual address to
+  ## the given physical address.
+  let size = npages * PageSize
+  let region = ksAllocAt(vaddr, npages)  # TODO: store the region
+  let vmo = newPinnedVmObject(paddr, size)
+  let mapping = VmMapping(
+    region: region,
+    paddr: some paddr,
+    vmo: vmo,
+    offset: 0,
+    permissions: perms,
+    privilege: pSupervisor,
+    flags: flags,
+  )
+  mapIntoPageTable(newkpml4, mapping)
+
+### User mappings
+
+proc uvMap*(
+  pml4: ptr PML4Table,
+  npages: uint64,
+  perms: VmPermissions,
+  flags: VmMappingFlags,
+): VmMapping =
+  ## Map a new region of memory into a task's address space.
+  let size = npages * PageSize
+  let vmregion = usAlloc(npages)
+  let vmo = newAnonymousVmObject(size)
+  let mapping = VmMapping(
+    region: vmregion,
     vmo: vmo,
     offset: 0,
     permissions: perms,
     privilege: pUser,
-    flags: {vmPrivate}
+    flags: flags,
   )
-  mapIntoPageTable(task.pml4, mapping)
-  task.vmMappings.add(mapping)
-
+  mapIntoPageTable(pml4, mapping)
+  result = mapping
 
 proc pageFaultHandler*(task: Task, vaddr: uint64) =
   let pml4 = task.pml4

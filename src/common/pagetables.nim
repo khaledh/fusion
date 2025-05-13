@@ -59,7 +59,7 @@ type
     ignored2*     {.bitsize:  3.}: uint64     # bits 11: 9
     pat*          {.bitsize:  1.}: uint64     # bit     12
     reserved*     {.bitsize: 17.}: uint64     # bit  29:13
-    physAddress*  {.bitsize: 22.}: uint64     # bits 51:30  (-> 1 GiB page)
+    physAddress*  {.bitsize: 22.}: uint64     # bits 51:30  -> 1 GiB page, or VMO id (if present=0)
     osdata*       {.bitsize: 11.}: uint64     # bits 62:52  OS-specific data (ignored by MMU)
     xd*           {.bitsize:  1.}: uint64     # bit     63
 
@@ -92,7 +92,7 @@ type
     ignored2*     {.bitsize:  3.}: uint64     # bits 11: 9
     pat*          {.bitsize:  1.}: uint64     # bit     12
     reserved*     {.bitsize:  8.}: uint64     # bit  20:13
-    physAddress*  {.bitsize: 31.}: uint64     # bits 51:21  (-> 2 MiB page)
+    physAddress*  {.bitsize: 31.}: uint64     # bits 51:21  -> 2 MiB page, or VMO id (if present=0)
     osdata*       {.bitsize: 11.}: uint64     # bits 62:52  OS-specific data (ignored by MMU)
     xd*           {.bitsize:  1.}: uint64     # bit     63
 
@@ -108,7 +108,7 @@ type
     pat*          {.bitsize:  1.}: uint64     # bit      7
     global*       {.bitsize:  1.}: uint64     # bit      8  (no TLB flush on PCID switch)
     ignored2*     {.bitsize:  3.}: uint64     # bits 11: 9
-    physAddress*  {.bitsize: 40.}: uint64     # bits 51:12  (-> 4 KiB page)
+    physAddress*  {.bitsize: 40.}: uint64     # bits 51:12  -> 4 KiB page, or VMO id (if present=0)
     osdata*       {.bitsize: 11.}: uint64     # bits 62:52  OS-specific data (ignored by MMU)
     xd*           {.bitsize:  1.}: uint64     # bit     63
 
@@ -189,7 +189,12 @@ proc pml4addr*(cr3: CR3): PAddr {.inline.} =
 proc paddr*(entry: PML4Entry | PDPTEntry | PDEntry | PTEntry): PAddr {.inline.} =
   result = PAddr(entry.physAddress.uint64 shl 12)
 
-proc `paddr=`*(entry: var PTEntry, paddr: PAddr) {.inline.} = entry.physAddress = paddr.uint64 shr 12
-proc `paddr=`*(entry: var PDEntry, paddr: PAddr) {.inline.} = entry.physAddress = paddr.uint64 shr 12
-proc `paddr=`*(entry: var PDPTEntry, paddr: PAddr) {.inline.} = entry.physAddress = paddr.uint64 shr 12
-proc `paddr=`*(entry: var PML4Entry, paddr: PAddr) {.inline.} = entry.physAddress = paddr.uint64 shr 12
+proc `paddr=`*(entry: var PML4Entry, paddr: uint64) {.inline.} = entry.physAddress = paddr shr 12
+proc `paddr=`*(entry: var PDPTEntry, paddr: uint64) {.inline.} = entry.physAddress = paddr shr 12
+proc `paddr=`*(entry: var PDEntry, paddr: uint64) {.inline.} = entry.physAddress = paddr shr 12
+proc `paddr=`*(entry: var PTEntry, paddr: uint64) {.inline.} = entry.physAddress = paddr shr 12
+
+proc `paddr=`*(entry: var PML4Entry, paddr: PAddr) {.inline.} = entry.paddr = paddr.uint64
+proc `paddr=`*(entry: var PDPTEntry, paddr: PAddr) {.inline.} = entry.paddr = paddr.uint64
+proc `paddr=`*(entry: var PDEntry, paddr: PAddr) {.inline.} = entry.paddr = paddr.uint64
+proc `paddr=`*(entry: var PTEntry, paddr: PAddr) {.inline.} = entry.paddr = paddr.uint64
