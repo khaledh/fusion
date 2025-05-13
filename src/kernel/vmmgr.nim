@@ -1,11 +1,11 @@
 #[
   Virtual Memory Manager
 
-  Manages the mapping of virtual memory to physical memory through task page tables.
+  Manages the mapping of virtual memory to physical memory through kernel and task page tables.
 ]#
 
 import common/pagetables
-import vmdefs, vmpgtbl, vmobject, vmspace
+import vmdefs, vmpagetbl, vmobject, vmspace
 import task
 
 let
@@ -63,6 +63,7 @@ proc vmmgrInit*(
   newkpml4 = newPageTable()
   
   # Map the kernel image
+  logger.info "  mapping kernel image and stack"
   discard kvMapAt(
     vaddr = kernelImageVirtualBase,
     paddr = kernelImagePhysicalBase,
@@ -85,6 +86,7 @@ proc createDirectMapping*(
 ) =
   ## Creates a direct mapping of the physical memory at the given virtual address.
   pmBase = physMemoryVirtualBase
+  logger.info "  mapping physical memory"
   discard kvMapAt(
     vaddr = physMemoryVirtualBase,
     paddr = 0.PAddr,

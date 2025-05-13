@@ -12,7 +12,7 @@ import sched
 import timer
 import task
 import vmm
-import vmdefs, vmmgr, vmpgtbl
+import vmdefs, vmmgr, vmpagetbl
 
 
 let

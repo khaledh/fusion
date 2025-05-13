@@ -1,5 +1,5 @@
 #[
-  Virtual MemoryPage Table Management
+  Virtual Memory Page Table Management
 ]#
 
 import common/pagetables
@@ -8,7 +8,7 @@ import vmdefs
 import vmm  # TODO: remove this
 
 var
-  logger = DebugLogger(name: "vmpgtbl")
+  logger = DebugLogger(name: "vmpagetbl")
 
 ####################################################################################################
 # Page Table Indexing
@@ -98,7 +98,7 @@ proc nextPTEntry(idx: var PageTableIndex, vaddr: var VAddr): bool =
     vaddr = indexToVAddr(idx)
 
 ####################################################################################################
-# Page Table Translation
+# Address Translation
 ####################################################################################################
 
 proc translate*(vaddr: VAddr, pml4: ptr PML4Table): Option[PAddr] =
