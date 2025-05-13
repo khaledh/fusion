@@ -117,7 +117,8 @@ proc v2p*(virt: VAddr, pml4: ptr PML4Table): Option[PAddr] =
   if pt[ptIndex].present == 0:
     return none(PAddr)
 
-  result = some PAddr(pt[ptIndex].physAddress shl 12)
+  let pageOffset = virt.uint64 and 0xfff
+  result = some PAddr((pt[ptIndex].physAddress shl 12) + pageOffset)
 
 proc v2p*(virt: VAddr): Option[PAddr] =
   v2p(virt, getActivePML4())
@@ -278,7 +279,6 @@ proc vmmap*(
   result = pmalloc(region.npages)
   mapRegion(pml4, region.start, result, region.npages, pageAccess, pageMode, noExec)
 
-
 ####################################################################################################
 # Dump page tables
 ####################################################################################################
@@ -307,14 +307,14 @@ proc dumpPageTable*(pml4: ptr PML4Table) =
       virt = p2v(phys)
       var pml4mapped = pml4Index.uint64 shl (39 + 16)
       pml4mapped = sar(pml4mapped, 16)
-      debugln &"  [{pml4Index:>03}] [{pml4mapped:#018x}]    PDPT: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pml4.entries[pml4Index].user} write={pml4.entries[pml4Index].write} nx={pml4.entries[pml4Index].xd}"
+      debugln &"  [{pml4Index:>03}] [{pml4mapped:#018x}]    PDPT: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pml4.entries[pml4Index].user} write={pml4.entries[pml4Index].write} nx={pml4.entries[pml4Index].xd} present={pml4.entries[pml4Index].present}"
       let pdpt = cast[ptr PDPTable](virt)
       for pdptIndex in 0 ..< 512:
         if pdpt.entries[pdptIndex].present == 1:
           phys = PAddr(pdpt.entries[pdptIndex].physAddress shl 12)
           virt = p2v(phys)
           let pdptmapped = pml4mapped or (pdptIndex.uint64 shl 30)
-          debugln &"    [{pdptIndex:>03}] [{pdptmapped:#018x}]    PD: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pdpt.entries[pdptIndex].user} write={pdpt.entries[pdptIndex].write} nx={pdpt.entries[pdptIndex].xd}"
+          debugln &"    [{pdptIndex:>03}] [{pdptmapped:#018x}]    PD: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pdpt.entries[pdptIndex].user} write={pdpt.entries[pdptIndex].write} nx={pdpt.entries[pdptIndex].xd} present={pdpt.entries[pdptIndex].present}"
           let pd = cast[ptr PDTable](virt)
           for pdIndex in 0 ..< 512:
             if pd.entries[pdIndex].present == 1:
@@ -323,7 +323,7 @@ proc dumpPageTable*(pml4: ptr PML4Table) =
               virt = p2v(phys)
               # debugln &"  ptVirt = {virt.uint64:#018x}"
               let pdmapped = pdptmapped or (pdIndex.uint64 shl 21)
-              debugln &"      [{pdIndex:>03}] [{pdmapped:#018x}]  PT: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pd.entries[pdIndex].user} write={pd.entries[pdIndex].write} nx={pd.entries[pdIndex].xd}"
+              debugln &"      [{pdIndex:>03}] [{pdmapped:#018x}]  PT: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pd.entries[pdIndex].user} write={pd.entries[pdIndex].write} nx={pd.entries[pdIndex].xd} present={pd.entries[pdIndex].present}"
               let pt = cast[ptr PTable](virt)
               for ptIndex in 0 ..< 512:
                 var first = false
@@ -338,7 +338,7 @@ proc dumpPageTable*(pml4: ptr PML4Table) =
                     virt = p2v(phys)
                     # debugln &"  pageVirt = {virt.uint64:#018x}"
                     let ptmapped = pdmapped or (ptIndex.uint64 shl 12)
-                    debugln &"        \x1b[1;31m[{ptIndex:>03}] [{ptmapped:#018x}] P: phys = {phys.uint64:#018x}                              user={pt.entries[ptIndex].user} write={pt.entries[ptIndex].write} nx={pt.entries[ptIndex].xd}\x1b[1;0m"
+                    debugln &"        \x1b[1;31m[{ptIndex:>03}] [{ptmapped:#018x}] P: phys = {phys.uint64:#018x}                              user={pt.entries[ptIndex].user} write={pt.entries[ptIndex].write} nx={pt.entries[ptIndex].xd} present={pt.entries[ptIndex].present}\x1b[1;0m"
                     if ptIndex == 0 or (pt.entries[ptIndex-1].present == 0) or pt.entries[ptIndex-1].xd != pt.entries[ptIndex].xd:
                       first = true
                   if first and ptIndex < 511 and pt.entries[ptIndex+1].present == 1 and pt.entries[ptIndex+1].xd == pt.entries[ptIndex].xd:

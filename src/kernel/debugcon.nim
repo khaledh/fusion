@@ -15,21 +15,28 @@ template undim*(): string = "\e[0m"
 template dimmed*(s: untyped): string = dim() & s & undim()
 template hex*(): string = dimmed("h")
 
+type
+  BinUnit* = enum
+    bDynamic, bThousands, bBytes, bKiB, bMiB, bGiB, bTiB
+
 const
   KiB* = 1024
   MiB* = KiB * KiB
   GiB* = KiB * MiB
+  TiB* = KiB * GiB
 
-proc bytesToBinSize*(size: uint64): string =
+proc bytesToBinSize*(size: uint64, unit: BinUnit = bDynamic): string =
   ## Convert a size in bytes to a human-readable format.
-  if size < 1024:
-    &"{size} B"
-  elif size < 1024 * 1024:
-    &"{size div KiB} KiB"
-  elif size < 1024 * 1024 * 1024:
-    &"{size div MiB} MiB"
+  if unit == bBytes or (unit == bDynamic and size < KiB or unit == bThousands and size < MiB):
+    return &"{size} B"
+  elif unit == bKiB or (unit == bDynamic and size < MiB or unit == bThousands and size < GiB):
+    return &"{size div KiB} KiB"
+  elif unit == bMiB or (unit == bDynamic and size < GiB or unit == bThousands and size < TiB):
+    return &"{size div MiB} MiB"
+  elif unit == bGiB or (unit == bDynamic and size < TiB or unit == bThousands):
+    return &"{size div GiB} GiB"
   else:
-    &"{size div GiB} GiB"
+    return &"{size div TiB} TiB"
 
 const DebugConPort = 0xe9
 

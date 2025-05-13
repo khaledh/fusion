@@ -27,7 +27,7 @@ type
     reserved1*    {.bitsize:  1.}: uint64     # bit      7
     ignored2*     {.bitsize:  4.}: uint64     # bits 11: 8
     physAddress*  {.bitsize: 40.}: uint64     # bits 51:12  (-> PDPTable)
-    ignored3*     {.bitsize: 11.}: uint64     # bits 62:52
+    osdata*       {.bitsize: 11.}: uint64     # bits 62:52  OS-specific data (ignored by MMU)
     xd*           {.bitsize:  1.}: uint64     # bit     63
 
   # Page Directory Pointer Table Entry (maps 1 PDTablel = 1 GiB of virtual memory)
@@ -42,7 +42,7 @@ type
     pageSize*     {.bitsize:  1.}: uint64 = 0 # bit      7
     ignored2*     {.bitsize:  4.}: uint64     # bits 11: 8
     physAddress*  {.bitsize: 40.}: uint64     # bits 51:12  (-> PDTable)
-    ignored3*     {.bitsize: 11.}: uint64     # bits 62:52
+    osdata*       {.bitsize: 11.}: uint64     # bits 62:52  OS-specific data (ignored by MMU)
     xd*           {.bitsize:  1.}: uint64     # bit     63
 
   # Page Directory Pointer Table Entry (maps a single 1 GiB page)
@@ -60,7 +60,7 @@ type
     pat*          {.bitsize:  1.}: uint64     # bit     12
     reserved*     {.bitsize: 17.}: uint64     # bit  29:13
     physAddress*  {.bitsize: 22.}: uint64     # bits 51:30  (-> 1 GiB page)
-    ignored3*     {.bitsize: 11.}: uint64     # bits 62:52
+    osdata*       {.bitsize: 11.}: uint64     # bits 62:52  OS-specific data (ignored by MMU)
     xd*           {.bitsize:  1.}: uint64     # bit     63
 
   # Page Directory Entry (maps 1 PTable = 2 MiB of virtual memory)
@@ -75,7 +75,7 @@ type
     pageSize*     {.bitsize:  1.}: uint64 = 0 # bit      7
     ignored2*     {.bitsize:  4.}: uint64     # bits 11: 8
     physAddress*  {.bitsize: 40.}: uint64     # bits 51:12  (-> PTable)
-    ignored3*     {.bitsize: 11.}: uint64     # bits 62:52
+    osdata*       {.bitsize: 11.}: uint64     # bits 62:52  OS-specific data (ignored by MMU)
     xd*           {.bitsize:  1.}: uint64     # bit     63
 
   # Page Directory Entry (maps a single 2 MiB page)
@@ -93,7 +93,7 @@ type
     pat*          {.bitsize:  1.}: uint64     # bit     12
     reserved*     {.bitsize:  8.}: uint64     # bit  20:13
     physAddress*  {.bitsize: 31.}: uint64     # bits 51:21  (-> 2 MiB page)
-    ignored3*     {.bitsize: 11.}: uint64     # bits 62:52
+    osdata*       {.bitsize: 11.}: uint64     # bits 62:52  OS-specific data (ignored by MMU)
     xd*           {.bitsize:  1.}: uint64     # bit     63
 
   # Page Table Entry (maps a single 4 KiB page)
@@ -109,7 +109,7 @@ type
     global*       {.bitsize:  1.}: uint64     # bit      8  (no TLB flush on PCID switch)
     ignored2*     {.bitsize:  3.}: uint64     # bits 11: 9
     physAddress*  {.bitsize: 40.}: uint64     # bits 51:12  (-> 4 KiB page)
-    ignored3*     {.bitsize: 11.}: uint64     # bits 62:52
+    osdata*       {.bitsize: 11.}: uint64     # bits 62:52  OS-specific data (ignored by MMU)
     xd*           {.bitsize:  1.}: uint64     # bit     63
 
   # Page Map Level 4 Table
@@ -153,6 +153,11 @@ proc `[]`*(pdpt: ptr PDPTable; index: uint64): var PDPTEntry {.inline.} = pdpt.e
 proc `[]`*(pd: ptr PDTable; index: uint64): var PDEntry {.inline.} = pd.entries[index]
 proc `[]`*(pt: ptr PTable; index: uint64): var PTEntry {.inline.} = pt.entries[index]
 
+proc len*(pml4: PML4Table): int {.inline.} = pml4.entries.len
+proc len*(pdpt: PDPTable): int {.inline.} = pdpt.entries.len
+proc len*(pd: PDTable): int {.inline.} = pd.entries.len
+proc len*(pt: PTable): int {.inline.} = pt.entries.len
+
 ## CR3 get/set
 
 proc getCR3*(): CR3 {.inline.} =
@@ -179,4 +184,12 @@ proc newCR3*(pml4addr: PAddr): CR3 {.inline.} =
   result = CR3(physAddress: pml4addr.uint64 shr 12)
 
 proc pml4addr*(cr3: CR3): PAddr {.inline.} =
-  result = PAddr(cr3.physAddress shl 12)
+  result = PAddr(cr3.physAddress.uint64 shl 12)
+
+proc paddr*(entry: PML4Entry | PDPTEntry | PDEntry | PTEntry): PAddr {.inline.} =
+  result = PAddr(entry.physAddress.uint64 shl 12)
+
+proc `paddr=`*(entry: var PTEntry, paddr: PAddr) {.inline.} = entry.physAddress = paddr.uint64 shr 12
+proc `paddr=`*(entry: var PDEntry, paddr: PAddr) {.inline.} = entry.physAddress = paddr.uint64 shr 12
+proc `paddr=`*(entry: var PDPTEntry, paddr: PAddr) {.inline.} = entry.physAddress = paddr.uint64 shr 12
+proc `paddr=`*(entry: var PML4Entry, paddr: PAddr) {.inline.} = entry.physAddress = paddr.uint64 shr 12

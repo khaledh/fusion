@@ -15,9 +15,9 @@ const
   KernelImagePhysicalBase = 0x10_0000'u64  # at 1 MiB
   KernelImageVirtualBase = 0xffff_ffff_8000_0000'u64 + KernelImagePhysicalBase
 
-  BootInfoSize = 4 * KiB
-  BootInfoPages = BootInfoSize div PageSize
-  BootInfoVirtualBase = 0xffff_ffff_ffff_0000'u64 - BootInfoSize # Last page of address space
+  BootInfoVirtualBase = 0xffff_ffff_ffff_f000'u64 # Last page of address space
+  BootInfoSize = PageSize
+  BootInfoPages = 1
 
   KernelStackSize = 64 * KiB
   KernelStackPages = KernelStackSize div PageSize
@@ -104,6 +104,9 @@ proc EfiMain(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus {.ex
 proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus =
   logger.raw "Fusion UEFI Bootloader\n"
   logger.raw "\n"
+
+  logger.info &"KernelStackVirtualBase = {KernelStackVirtualBase:#016x}"
+  logger.info &"KernelStackVirtualEnd = {KernelStackVirtualEnd:#016x}"
 
   consoleOutColor "Fusion OS Bootloader", fgYellow
   echo ""

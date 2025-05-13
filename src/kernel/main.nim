@@ -5,7 +5,7 @@
 import common/[bootinfo, libc, malloc, serde]
 import
   channels, cpu, ctxswitch, devmgr, drivers/pci, idt, lapic,
-  gdt, pmm, sched, syscalls, task, taskmgr, timer, vmm
+  gdt, pmm, sched, syscalls, task, taskmgr, timer, vmm, vmmgr
 
 const KernelVersion = "0.1.0"
 
@@ -42,10 +42,27 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   )
 
   logger.info "init vmm"
+  # old vm implementation
   vmInit(bootInfo.physicalMemoryVirtualBase, pmm.pmAlloc)
   vmAddRegion(kspace, bootInfo.physicalMemoryVirtualBase.VAddr, bootInfo.physicalMemoryPages)
   vmAddRegion(kspace, bootInfo.kernelImageVirtualBase.VAddr, bootInfo.kernelImagePages)
   vmAddRegion(kspace, bootInfo.kernelStackVirtualBase.VAddr, bootInfo.kernelStackPages)
+
+  # new vm implementation
+  vmmgrInit(
+    bootInfo.kernelImageVirtualBase.VAddr,
+    bootInfo.kernelImagePhysicalBase.PAddr,
+    bootInfo.kernelImagePages,
+    bootInfo.kernelStackVirtualBase.VAddr,
+    bootInfo.kernelStackPhysicalBase.PAddr,
+    bootInfo.kernelStackPages,
+  )
+  createDirectMapping(
+    bootInfo.physicalMemoryVirtualBase.VAddr,
+    bootInfo.physicalMemoryPages,
+  )
+
+  # quit()
 
   logger.info "init gdt"
   gdtInit()

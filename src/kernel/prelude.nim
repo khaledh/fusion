@@ -47,6 +47,9 @@ template `==`*(a: VAddr, b: VAddr): bool =  a.uint64 == b.uint64
 template `<`*(a: VAddr, b: VAddr): bool =  a.uint64 < b.uint64
 template `<=`*(a: VAddr, b: VAddr): bool =  a.uint64 <= b.uint64
 
+template `inc`*(v: var VAddr, offset: uint64) = v = v +! offset.uint64
+template `dec`*(v: var VAddr, offset: uint64) = v = v -! offset.uint64
+
 # physical address operations
 
 template `+!`*(p: PAddr, offset: uint64): PAddr =
