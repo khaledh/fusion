@@ -5,9 +5,9 @@
 import common/[bootinfo, libc, malloc, serde]
 import
   channels, cpu, ctxswitch, devmgr, drivers/pci, idt, lapic,
-  gdt, pmm, sched, syscalls, task, taskmgr, timer, vmm, vmmgr
+  gdt, pmm, sched, syscalls, task, taskmgr, timer, vmmgr
 
-const KernelVersion = "0.1.0"
+const KernelVersion = "0.2.0"
 
 let logger = DebugLogger(name: "main")
 
@@ -34,6 +34,12 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.raw &"Fusion Kernel (v{KernelVersion})\n"
   logger.raw "\n"
 
+  logger.info "init gdt"
+  gdtInit()
+
+  logger.info "init idt"
+  idtInit()
+
   logger.info "init pmm"
   pmInit(
     bootInfo.physicalMemoryMap,
@@ -41,14 +47,11 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
     bootInfo.physicalMemoryPages,
   )
 
-  logger.info "init vmm"
-  # old vm implementation
-  vmInit(bootInfo.physicalMemoryVirtualBase, pmm.pmAlloc)
-  vmAddRegion(kspace, bootInfo.physicalMemoryVirtualBase.VAddr, bootInfo.physicalMemoryPages)
-  vmAddRegion(kspace, bootInfo.kernelImageVirtualBase.VAddr, bootInfo.kernelImagePages)
-  vmAddRegion(kspace, bootInfo.kernelStackVirtualBase.VAddr, bootInfo.kernelStackPages)
+  # copy some bootinfo fields before we switch to the new page table
+  let userImagePhysicalBase = bootInfo.userImagePhysicalBase.PAddr
+  let userImagePages = bootInfo.userImagePages
 
-  # new vm implementation
+  logger.info "init vmm"
   vmmgrInit(
     bootInfo.kernelImageVirtualBase.VAddr,
     bootInfo.kernelImagePhysicalBase.PAddr,
@@ -56,19 +59,9 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
     bootInfo.kernelStackVirtualBase.VAddr,
     bootInfo.kernelStackPhysicalBase.PAddr,
     bootInfo.kernelStackPages,
-  )
-  createDirectMapping(
     bootInfo.physicalMemoryVirtualBase.VAddr,
     bootInfo.physicalMemoryPages,
   )
-
-  # quit()
-
-  logger.info "init gdt"
-  gdtInit()
-
-  logger.info "init idt"
-  idtInit()
 
   logger.info "init lapic"
   lapicInit()
@@ -94,30 +87,32 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.info ""
   logger.info &"{dim()}========== for testing =========={undim()}"
 
-  # test channel
-  logger.info "creating a channel"
-  let ch = channels.create(msgSize = sizeof(int))
-
-  proc sendAlloc(size: int): pointer =
-    result = channels.alloc(ch.id, size)
-
-  let packedObj = serialize(">> \e[91mping from kernel\e[0m", sendAlloc)
-  let size = sizeof(packedObj.len) + packedObj.len
-  let msg = Message(len: size, data: cast[ptr UncheckedArray[byte]](packedObj))
-
-  discard channels.send(ch.id, msg)
+  # # test channel
+  # logger.info "creating a channel"
+  # let ch = channels.create(msgSize = sizeof(int))
+  #
+  # proc sendAlloc(size: int): pointer =
+  #   result = channels.alloc(ch.id, size)
+  #
+  # let packedObj = serialize(">> \e[91mping from kernel\e[0m", sendAlloc)
+  # let size = sizeof(packedObj.len) + packedObj.len
+  # let msg = Message(len: size, data: cast[ptr UncheckedArray[byte]](packedObj))
+  #
+  # discard channels.send(ch.id, msg)
 
   # test user tasks
-  logger.info &"creaeting two user tasks"
+  # logger.info &"creating two user tasks"
 
   var utask1 = createUserTask(
-    imagePhysAddr = bootInfo.userImagePhysicalBase.PAddr,
-    imagePageCount = bootInfo.userImagePages,
+    imagePhysAddr = userImagePhysicalBase,
+    imagePageCount = userImagePages,
     name = "utask1",
   )
+  logger.info ""
+
   var utask2 = createUserTask(
-    imagePhysAddr = bootInfo.userImagePhysicalBase.PAddr,
-    imagePageCount = bootInfo.userImagePages,
+    imagePhysAddr = userImagePhysicalBase,
+    imagePageCount = userImagePages,
     name = "utask2",
   )
 

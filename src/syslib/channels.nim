@@ -1,9 +1,14 @@
 #[
   Channel library functions
 ]#
-import common/serde
+import std/strformat
+
+import common/[debugcon, serde]
 
 include syscalldef
+
+let
+  logger = DebugLogger(name: "sys:chan")
 
 type
   ChannelMode* = enum
@@ -21,6 +26,7 @@ proc open*(cid: int, mode: ChannelMode): int {.stackTrace: off.} =
   ##   0 on success
   ##  -1 on error
   ##
+  # logger.info "open: opening channel"
   let modeVal = mode.int
   asm """
     syscall
@@ -118,7 +124,6 @@ proc recv*[T](cid: int, data: var T): int =
   ##   0 on success
   ##  -1 on error
   ## 
-
   var
     len: int
     packedObj {.codegenDecl: """register $# $# asm("r8")""".}: ptr PackedObj
@@ -134,6 +139,9 @@ proc recv*[T](cid: int, data: var T): int =
   """
 
   if result < 0:
+    logger.info &"recv: error receiving data from channel {cid}: {result}"
     return
 
+  logger.info &"recv: received data from channel {cid}: {len}"
   data = deserialize(packedObj)
+  logger.info &"recv: deserialized data from channel {cid}: {data}"

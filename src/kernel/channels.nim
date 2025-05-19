@@ -1,11 +1,9 @@
 import std/tables
 
-import common/pagetables
-import debugcon
 import locks
 import queues
 import task
-import vmm
+import vmdefs, vmmgr
 
 ## Channels are used for message passing between tasks.
 ##   - Each channel has a queue and a buffer.
@@ -44,6 +42,7 @@ type
     cap*: int
     data*: ptr UncheckedArray[byte]
     allocOffset*: int = 0
+    vmMapping: VmMapping
 
   Channel* = ref object
     id*: int
@@ -75,24 +74,30 @@ proc newChannelId(): int =
 proc create*(msgSize: int, msgCapacity: int = DefaultMessageCapacity): Channel =
   let buffSize = msgSize * msgCapacity
   let numPages = (buffSize + PageSize - 1) div PageSize
-  let buffRegion = vmalloc(uspace, numPages.uint64)
-  mapRegion(
-    pml4 = getActivePML4(),
-    virtAddr = buffRegion.start,
-    pageCount = numPages.uint64,
-    pageAccess = paReadWrite,
-    pageMode = pmUser,
-    noExec = true
+  # Map the buffer in user space.
+  let userMapping = uvMap(
+    pml4 = getActivePageTable(),
+    npages = numPages.uint64,
+    perms = {pRead, pWrite},
+    flags = {vmShared},
   )
-  let buffStartVirt = cast[VAddr](buffRegion.start)
-  let buffStartPhys = v2p(buffStartVirt).get
+  # Map the buffer in kernel space for shared access.
+  let kernelMapping = kvMapShared(
+    mapping = userMapping,
+    perms = {pRead, pWrite},
+    flags = {vmShared},
+  )
+
+  let buffStartVirt = cast[VAddr](userMapping.region.start)
+  logger.info &"create: mapped channel buffer to {buffStartVirt.uint64:#x}"
 
   result = Channel(
     id: newChannelId(),
     queue: newBlockingQueue[Message](msgCapacity),
     buffer: ChannelBuffer(
       cap: buffSize,
-      data: cast[ptr UncheckedArray[byte]](buffRegion.start)
+      data: cast[ptr UncheckedArray[byte]](userMapping.region.start),
+      vmMapping: userMapping,
     ),
     writeLock: newSpinLock(),
   )
@@ -108,19 +113,16 @@ proc open*(chid: int, task: Task, mode: ChannelMode): int =
   var ch = channels[chid]
   let buffStart = ch.buffer.data
   let numPages = (ch.buffer.cap + PageSize - 1) div PageSize
-  let pageAccess = if mode == ChannelMode.Read: paRead else: paReadWrite
+  let perms = if mode == ChannelMode.Read: {pRead} else: {pRead, pWrite}
 
   let buffStartVirt = cast[VAddr](buffStart)
-  let buffStartPhys = v2p(buffStartVirt, kpml4).get
-  mapRegion(
+  let mapping = uvMapShared(
     pml4 = task.pml4,
-    virtAddr = buffStartVirt,
-    physAddr = buffStartPhys,
-    pageCount = numPages.uint64,
-    pageAccess = pageAccess,
-    pageMode = pmUser,
-    noExec = true
+    mapping = ch.buffer.vmMapping,
+    perms = perms,
+    flags = {vmShared},
   )
+  task.vmMappings.add(mapping)
   logger.info &"open: opened channel id {chid} for task {task.id}"
 
 proc close*(chid: int, task: Task): int =
@@ -132,11 +134,11 @@ proc close*(chid: int, task: Task): int =
   var ch = channels[chid]
   let buffStart = ch.buffer.data
   let numPages = (ch.buffer.cap + PageSize - 1) div PageSize
-  unmapRegion(
-    pml4 = task.pml4,
-    virtAddr = cast[VAddr](buffStart),
-    pageCount = numPages.uint64
-  )
+  # discard uvUnmap(
+  #   pml4 = task.pml4,
+  #   vaddr = cast[VAddr](buffStart),
+  #   npages = numPages.uint64
+  # )
   logger.info &"close: closed channel id {chid} for task {task.id}"
 
 proc alloc*(chid: int, len: int): pointer {.stackTrace:off.} =

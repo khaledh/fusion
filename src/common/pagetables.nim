@@ -189,12 +189,14 @@ proc pml4addr*(cr3: CR3): PAddr {.inline.} =
 proc paddr*(entry: PML4Entry | PDPTEntry | PDEntry | PTEntry): PAddr {.inline.} =
   result = PAddr(entry.physAddress.uint64 shl 12)
 
-proc `paddr=`*(entry: var PML4Entry, paddr: uint64) {.inline.} = entry.physAddress = paddr shr 12
-proc `paddr=`*(entry: var PDPTEntry, paddr: uint64) {.inline.} = entry.physAddress = paddr shr 12
-proc `paddr=`*(entry: var PDEntry, paddr: uint64) {.inline.} = entry.physAddress = paddr shr 12
-proc `paddr=`*(entry: var PTEntry, paddr: uint64) {.inline.} = entry.physAddress = paddr shr 12
+proc paddr*(entry: ptr PML4Entry | ptr PDPTEntry | ptr PDEntry | ptr PTEntry): PAddr {.inline.} =
+  result = PAddr(entry.physAddress.uint64 shl 12)
 
-proc `paddr=`*(entry: var PML4Entry, paddr: PAddr) {.inline.} = entry.paddr = paddr.uint64
-proc `paddr=`*(entry: var PDPTEntry, paddr: PAddr) {.inline.} = entry.paddr = paddr.uint64
-proc `paddr=`*(entry: var PDEntry, paddr: PAddr) {.inline.} = entry.paddr = paddr.uint64
-proc `paddr=`*(entry: var PTEntry, paddr: PAddr) {.inline.} = entry.paddr = paddr.uint64
+proc `paddr=`*(e: var PML4Entry, paddr: PAddr | uint64) {.inline.} = e.physAddress = paddr.uint64 shr 12
+proc `paddr=`*(e: ptr PML4Entry, paddr: PAddr | uint64) {.inline.} = e.physAddress = paddr.uint64 shr 12
+proc `paddr=`*(e: var PDPTEntry, paddr: PAddr | uint64) {.inline.} = e.physAddress = paddr.uint64 shr 12
+proc `paddr=`*(e: ptr PDPTEntry, paddr: PAddr | uint64) {.inline.} = e.physAddress = paddr.uint64 shr 12
+proc `paddr=`*(e: var PDEntry, paddr: PAddr | uint64) {.inline.} = e.physAddress = paddr.uint64 shr 12
+proc `paddr=`*(e: ptr PDEntry, paddr: PAddr | uint64) {.inline.} = e.physAddress = paddr.uint64 shr 12
+proc `paddr=`*(e: var PTEntry, paddr: PAddr | uint64) {.inline.} = e.physAddress = paddr.uint64 shr 12
+proc `paddr=`*(e: ptr PTEntry, paddr: PAddr | uint64) {.inline.} = e.physAddress = paddr.uint64 shr 12

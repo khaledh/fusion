@@ -3,7 +3,7 @@
 ]#
 
 import common/pagetables
-import vmm, vmdefs
+import vmdefs
 
 const
   InitialQuantumMs = 20  # 20ms
@@ -24,7 +24,6 @@ type
     remainingQuantumMs*: uint64 = InitialQuantumMs
     sleepUntil*: uint64  # based on apic timer count
     # user task fields
-    vmRegions*: seq[vmm.VMRegion]
     vmMappings*: seq[VmMapping]
     pml4*: ptr PML4Table
     ustack*: TaskStack

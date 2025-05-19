@@ -6,13 +6,12 @@ import std/heapqueue
 
 import common/pagetables
 import lapic
-import loader
+import elfloader
 import gdt
 import sched
 import timer
 import task
-import vmm
-import vmdefs, vmmgr, vmpagetbl
+import vmdefs, vmmgr, vmpagetbl, vmspace
 
 
 let
@@ -20,6 +19,10 @@ let
 
 proc cmpSleepUntil(a, b: Task): bool {.inline.} =
   a.sleepUntil < b.sleepUntil
+
+const
+  TaskUserStackPages = 8    # 32 KiB
+  TaskKernelStackPages = 4  # 16 KiB
 
 var
   tasks = newSeq[Task]()
@@ -38,39 +41,34 @@ proc iretq*() {.asmNoStackFrame.} =
   ## makes returning from both new and interrupted tasks the same.
   asm "iretq"
 
-proc createStack*(
-  vmRegions: var seq[vmm.VMRegion],
-  pml4: ptr PML4Table,
-  newpml4: ptr PML4Table,
-  space: var VMAddressSpace,
-  npages: uint64,
-  mode: PageMode
-): TaskStack =
-  let stackRegion = vmalloc(space, npages)
-  vmmap(stackRegion, pml4, paReadWrite, mode, noExec = true)
-  vmRegions.add(stackRegion)
+proc createUserStack*(pml4: ptr PML4Table, npages: uint64): TaskStack =
+  let guardPage = usAlloc(1)
+  let mapping = uvMapAt(
+    pml4 = pml4,
+    vaddr = guardPage.start +! PageSize.uint64,
+    npages = npages,
+    perms = {pRead, pWrite},
+    flags = {vmPrivate},
+  )
+  result.vmMapping = mapping
+  discard usAllocAt(mapping.region.end, 1)
 
-  # ############################################################
-  # ## new vm subsystem
-  # ## map the stack into the task's page table
-  if mode == pmUser:
-    let mapping = uvMap(
-      pml4 = newpml4,
-      npages = npages,
-      perms = {pRead, pWrite},
-      flags = {vmPrivate},
-    )
-    result.vmMapping = mapping
-  else:
-    let mapping = kvMap(
-      npages = npages,
-      perms = {pRead, pWrite},
-      flags = {vmPrivate},
-    )
-    result.vmMapping = mapping
-  # ############################################################
+  result.data = cast[ptr UncheckedArray[uint64]](mapping.region.start)
+  result.size = npages * PageSize
+  result.bottom = cast[uint64](result.data) + result.size
 
-  result.data = cast[ptr UncheckedArray[uint64]](stackRegion.start)
+proc createKernelStack*(npages: uint64): TaskStack =
+  let guardPage = ksAlloc(1)
+  let mappingForKernel = kvMapAt(
+    vaddr = guardPage.start +! PageSize.uint64,
+    npages = npages,
+    perms = {pRead, pWrite},
+    flags = {vmPrivate},
+  )
+  result.vmMapping = mappingForKernel
+  kvmMappings.add(mappingForKernel)
+  
+  result.data = cast[ptr UncheckedArray[uint64]](mappingForKernel.region.start)
   result.size = npages * PageSize
   result.bottom = cast[uint64](result.data) + result.size
 
@@ -86,22 +84,22 @@ proc createStack*(
 #     c. `rflags` is set to 0x202 (interrupts enabled)
 # 5. The task begins execution using its user stack
 #
+#       1000 +-------------------+
+#        ff8 | ss                | <-- stack bottom
+#        ff0 | rsp               |
+#        fe8 | rflags            | <-- `InterruptStackFrame` (pushed/popped by cpu)
+#        fe0 | cs                |
+#        fd8 | rip               |
 #            +-------------------+
-#      0xfff | ss                | <-- stack bottom
-#            | rsp               |
-#            | rflags            | <-- `InterruptStackFrame` (pushed/popped by cpu)
-#            | cs                |
-#            | rip               |
-#            +-------------------+
-#      0xfd8 | iretq proc ptr    | <-- `ret` instruction will pop this into `rip`, which
+#        fd0 | iretq proc ptr    | <-- `ret` instruction will pop this into `rip`, which
 #            +-------------------+     will execute `iretq`
-#      0xfd0 | rax               |
+#        fc8 | rax               |
 #            | ...               |
 #            | ...               | <-- `TaskRegs` (pushed/popped by kernel)
 #            | ...               |
-#      0xf58 | r15               | <-- rsp
+#        f58 | r15               | <-- rsp
 #            +-------------------+
-#
+
 
 proc createUserTask*(
   imagePhysAddr: PAddr,
@@ -109,29 +107,23 @@ proc createUserTask*(
   name: string = "",
   priority: TaskPriority = 0
 ): Task =
+  logger.info "Creating user task"
 
-  var vmRegions = newSeq[vmm.VMRegion]()
-  var pml4 = cast[ptr PML4Table](new PML4Table)
-  var newpml4 = newPageTable()
+  var pml4 = newPageTable()
 
-  logger.info &"loading task from ELF image"
-  let imagePtr = cast[pointer](vmm.p2v(imagePhysAddr))
-  let loadedImage = load(imagePtr, pml4, newpml4)
-  vmRegions.add(loadedImage.vmRegion)
-  logger.info &"loaded task at: {loadedImage.vmRegion.start.uint64:#x}"
+  logger.info &"Loading task from ELF image"
+  let imagePtr = cast[pointer](p2v(imagePhysAddr))
+  let newLoadedImage = loadElfImage(imagePtr, pml4)
+
+  logger.info &"Creating user and kernel stacks"
+  let ustack = createUserStack(pml4, TaskUserStackPages)
+  let kstack = createKernelStack(TaskKernelStackPages)
 
   # map kernel space
-  # logger.info &"mapping kernel space in task's page table"
   for i in 256 ..< 512:
     pml4.entries[i] = kpml4.entries[i]
 
-  # create user and kernel stacks
-  # logger.info &"creating task stacks"
-  let ustack = createStack(vmRegions, pml4, newpml4, uspace, 1, pmUser)
-  let kstack = createStack(vmRegions, pml4, newpml4, kspace, 1, pmSupervisor)
-
   # create stack frame
-
   # logger.info &"setting up interrupt stack frame"
   let isfAddr = kstack.bottom - sizeof(InterruptStackFrame).uint64
   var isf = cast[ptr InterruptStackFrame](isfAddr)
@@ -139,7 +131,7 @@ proc createUserTask*(
   isf.rsp = cast[uint64](ustack.bottom)
   isf.rflags = cast[uint64](0x202)
   isf.cs = cast[uint64](UserCodeSegmentSelector)
-  isf.rip = cast[uint64](loadedImage.entryPoint)
+  isf.rip = cast[uint64](newLoadedImage.entryPoint)
 
   # logger.info &"setting up iretq proc ptr"
   let iretqPtrAddr = isfAddr - sizeof(uint64).uint64
@@ -158,7 +150,6 @@ proc createUserTask*(
     id: taskId,
     name: name,
     priority: priority,
-    vmRegions: vmRegions,
     pml4: pml4,
     ustack: ustack,
     kstack: kstack,
@@ -166,15 +157,21 @@ proc createUserTask*(
     state: TaskState.New,
     isUser: true,
   )
-  ############################################################
-  # new vm subsystem
-  result.vmMappings.add(loadedImage.vmMappings)
+
+  # add all vm mappings to the task
+  result.vmMappings.add(newLoadedImage.vmMappings)
   result.vmMappings.add(ustack.vmMapping)
-  ############################################################
 
   tasks.add(result)
 
-  logger.info &"created user task {taskId}"
+  logger.info &"Created user task {taskId}"
+  logger.info &"  Base: {newLoadedImage.base.uint64:#x}"
+  logger.info &"  Entry point: {newLoadedImage.entryPoint.uint64:#x}"
+
+
+########################################################
+# Kernel task management
+########################################################
 
 type
   KernelProc* = proc () {.cdecl.}
@@ -188,15 +185,13 @@ proc kernelTaskWrapper*(kproc: KernelProc) =
 
 proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPriority = 0): Task =
 
-  var vmRegions = newSeq[vmm.VMRegion]()
-  var pml4 = getActivePML4()
+  var pml4 = getActivePageTable()
 
-  logger.info &"creating kernel task \"{name}\""
-  let kstack = createStack(vmRegions, pml4, newkpml4, kspace, 1, pmSupervisor)
+  logger.info &"Creating kernel task \"{name}\""
+  let kstack = createKernelStack(TaskKernelStackPages)
 
   # create stack frame
 
-  # logger.info &"setting up interrupt stack frame"
   let isfAddr = kstack.bottom - sizeof(InterruptStackFrame).uint64
   var isf = cast[ptr InterruptStackFrame](isfAddr)
   isf.ss = 0  # kernel ss selector must be null
@@ -223,18 +218,19 @@ proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPrior
     id: taskId,
     name: name,
     priority: priority,
-    vmRegions: vmRegions,
     pml4: pml4,
     kstack: kstack,
     rsp: regsAddr,
     state: TaskState.New,
     isUser: false,
   )
+  result.vmMappings.add(kstack.vmMapping)
+
   tasks.add(result)
 
-  logger.info &"created kernel task {taskId}"
+  logger.info &"Created kernel task {taskId}"
 
-###
+########################################################
 # Task operations on self
 ###
 
@@ -264,9 +260,9 @@ proc terminate*() =
   sched.removeTask(task)
   sched.schedule()
 
-###
+########################################################
 # Task operations on other tasks
-###
+########################################################
 
 proc resume*(task: Task) =
   logger.info &"setting task {task.id} to ready"

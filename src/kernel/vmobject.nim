@@ -2,6 +2,7 @@ import std/tables
 
 import pmm
 import vmdefs
+import elf
 
 var
   vmObjects: seq[VmObject]
@@ -15,7 +16,7 @@ proc getVmObject*(id: uint64): Option[VmObject] =
   else:
     result = none(VmObject)
 
-proc anonVmObjectPager*(vmobj: PageableVmObject, offset: uint64, npages: uint64): PAddr =
+proc anonVmObjectPageIn*(vmobj: VmObject, offset: uint64, npages: uint64): PAddr =
   ## Pager procedure for an anonymous VmObject.
   ##
   ## It simply allocates physical memory for the page(s) and returns the physical address.
@@ -25,9 +26,10 @@ proc anonVmObjectPager*(vmobj: PageableVmObject, offset: uint64, npages: uint64)
     vmobj.pageMap[pageIndex] = result +! i * PageSize
     inc(pageIndex)
 
-proc newPinnedVmObject*(paddr: PAddr, size: uint64): PinnedVmObject =
+proc newPinnedVmObject*(paddr: PAddr, size: uint64): VmObject =
   ## Create a new pinned VmObject.
-  result = PinnedVmObject(
+  result = VmObject(
+    kind: vmObjectPinned,
     id: nextVmObjectId(),
     size: size,
     paddr: paddr,
@@ -36,11 +38,43 @@ proc newPinnedVmObject*(paddr: PAddr, size: uint64): PinnedVmObject =
 
 proc newAnonymousVmObject*(size: uint64): VmObject =
   ## Create a new anonymous VmObject.
-  result = PageableVmObject(
+  result = VmObject(
+    kind: vmObjectPageable,
     id: nextVmObjectId(),
     size: size,
     rc: 1,
-    pageMap: initTable[uint64, PAddr](),
-    pager: anonVmObjectPager,
+    pageMap: newTable[uint64, PAddr](),
+    pager: anonVmObjectPageIn,
+  )
+  vmObjects.add(result)
+
+proc newPageableVmObject*(size: uint64, pager: VmObjectPagerProc): VmObject =
+  ## Create a new pageable VmObject.
+  result = VmObject(
+    kind: vmObjectPageable,
+    id: nextVmObjectId(),
+    size: size,
+    rc: 1,
+    pageMap: newTable[uint64, PAddr](),
+    pager: pager,
+  )
+  vmObjects.add(result)
+
+proc newElfSegmentVmObject*(
+  image: ElfImage,
+  ph: ptr ElfProgramHeader,
+  size: uint64,
+  pager: VmObjectPagerProc,
+): VmObject =
+  ## Create a new VmObject for an ELF segment.
+  result = VmObject(
+    kind: vmObjectElfSegment,
+    id: nextVmObjectId(),
+    size: size,
+    pageMap: newTable[uint64, PAddr](),
+    image: image,
+    pager: pager,
+    ph: ph,
+    rcSeg: 1,
   )
   vmObjects.add(result)

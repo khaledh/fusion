@@ -4,12 +4,11 @@
 
 import std/algorithm
 
-import common/pagetables
 import cpu
 import idt
 import pit
 import util
-import vmm
+import vmdefs, vmmgr
 
 type
   IA32ApicBaseMsr {.packed.} = object
@@ -64,18 +63,15 @@ proc initBaseAddress() =
   let apicBaseMsr = cast[IA32ApicBaseMsr](readMSR(IA32_APIC_BASE))
   let apicPhysAddr = (apicBaseMsr.baseAddress shl 12).PAddr
   # by definition, apicPhysAddr is aligned to a page boundary, so we map it directly
-  let apicVMRegion = vmalloc(kspace, 1)
-  mapRegion(
-    pml4 = kpml4,
-    virtAddr = apicVMRegion.start,
-    physAddr = apicPhysAddr,
-    pageCount = 1,
-    pageAccess = paReadWrite,
-    pageMode = pmSupervisor,
-    noExec = true
+  logger.info &"  local apic physical address: {apicPhysAddr.uint64:#x}"
+  let mapping = kvMapAt(
+    paddr = apicPhysAddr,
+    npages = 1,
+    perms = {pRead, pWrite},
+    flags = {vmPrivate},
   )
-  apicBaseAddress = apicVMRegion.start.uint64
-
+  apicBaseAddress = mapping.region.start.uint64
+  logger.info &"  local apic mapped at virtual address: {apicBaseAddress.uint64:#x}"
 proc readRegister(offset: LapicOffset): uint32 {.inline.} =
   result = cast[ptr uint32](apicBaseAddress + offset.uint16)[]
 

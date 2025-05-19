@@ -5,7 +5,7 @@
 import cpu
 import gdt
 import task
-import vmm
+import vmmgr
 
 var
   currentTask {.importc.}: Task
@@ -18,7 +18,7 @@ proc switchTo*(next: var Task) =
   # set the TSS rsp0 to the new task's kernel stack
   tss.rsp0 = next.kstack.bottom
   # activate the new task's page tables
-  setActivePML4(next.pml4)
+  setActivePageTable(next.pml4)
 
   var oldTask = currentTask
   currentTask = next

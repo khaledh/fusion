@@ -22,8 +22,8 @@ type
     limit: uint16
     base: pointer
 
-  InterruptHandler = proc (frame: ptr InterruptFrame) {.cdecl.}
-  InterruptHandlerWithErrorCode = proc (frame: ptr InterruptFrame, errorCode: uint64) {.cdecl.}
+  InterruptHandler* = proc (frame: ptr InterruptFrame) {.cdecl.}
+  InterruptHandlerWithErrorCode* = proc (frame: ptr InterruptFrame, errorCode: uint64) {.cdecl.}
 
   InterruptFrame* {.packed.} = object
     ip*: uint64
@@ -42,6 +42,7 @@ let
   )
 
 proc newInterruptGate(handler: pointer, dpl: uint8 = 0): InterruptGate =
+  ## Create a new interrupt gate for the given handler.
   let offset = cast[uint64](handler)
   result = InterruptGate(
     offset00: uint16(offset),
@@ -50,11 +51,35 @@ proc newInterruptGate(handler: pointer, dpl: uint8 = 0): InterruptGate =
     dpl: dpl,
   )
 
-proc installHandler*(vector: uint8, handler: InterruptHandler, dpl: uint8 = 0) =
-  idtEntries[vector] = newInterruptGate(handler, dpl)
+proc getInterruptHandlerProc(gate: InterruptGate): pointer =
+  ## Reconstruct the interrupt handler proc pointerfrom the gate.
+  result = cast[pointer](
+    (gate.offset32 shl 32) or
+    (gate.offset16 shl 16) or
+    gate.offset00
+  )
 
-proc installHandlerWithErrorCode*(vector: uint8, handler: InterruptHandlerWithErrorCode, dpl: uint8 = 0) =
+proc installHandler*(
+  vector: uint8,
+  handler: InterruptHandler,
+  dpl: uint8 = 0
+): Option[InterruptHandler] {.discardable.} =
+  ## Install an interrupt handler for a given vector.
+  ## Returns the previous handler if it exists.
+  let prevHandler = cast[InterruptHandler](getInterruptHandlerProc(idtEntries[vector]))
   idtEntries[vector] = newInterruptGate(handler, dpl)
+  result = if prevHandler == nil: none(InterruptHandler) else: some(prevHandler)
+
+proc installHandlerWithErrorCode*(
+  vector: uint8,
+  handler: InterruptHandlerWithErrorCode,
+  dpl: uint8 = 0
+): Option[InterruptHandlerWithErrorCode] {.discardable.} =
+  ## Install an interrupt handler for a given vector that takes an error code.
+  ## Returns the previous handler if it exists.
+  let prevHandler = cast[InterruptHandlerWithErrorCode](getInterruptHandlerProc(idtEntries[vector]))
+  idtEntries[vector] = newInterruptGate(handler, dpl)
+  result = if prevHandler == nil: none(InterruptHandlerWithErrorCode) else: some(prevHandler)
 
 proc cpuPageFaultHandler*(frame: ptr InterruptFrame, errorCode: uint64)
   {.cdecl, codegenDecl: "__attribute__ ((interrupt)) $# $#$#".} =
@@ -69,11 +94,11 @@ proc cpuPageFaultHandler*(frame: ptr InterruptFrame, errorCode: uint64)
   debugln &"    Faulting address: {cr2:#018x}"
   debugln ""
   debugln "  Interrupt Frame:"
-  debugln &"    IP: {frame.ip:#018x}"
-  debugln &"    CS: {frame.cs:#018x}"
-  debugln &"    Flags: {frame.flags:#018x}"
-  debugln &"    SP: {frame.sp:#018x}"
-  debugln &"    SS: {frame.ss:#018x}"
+  debugln &"      IP: {frame.ip:#018x}"
+  debugln &"      CS: {frame.cs:#018x}"
+  debugln &"   Flags: {frame.flags:#018x}"
+  debugln &"      SP: {frame.sp:#018x}"
+  debugln &"      SS: {frame.ss:#018x}"
   debugln ""
   debugln getStackTrace()
   quit()
@@ -84,11 +109,11 @@ proc cpuGeneralProtectionFaultHandler*(frame: ptr InterruptFrame, errorCode: uin
   debugln &"CPU Exception: General Protection Fault (Error Code: {errorCode:#x})"
   debugln ""
   debugln "  Interrupt Frame:"
-  debugln &"    IP: {frame.ip:#018x}"
-  debugln &"    CS: {frame.cs:#018x}"
-  debugln &"    Flags: {frame.flags:#018x}"
-  debugln &"    SP: {frame.sp:#018x}"
-  debugln &"    SS: {frame.ss:#018x}"
+  debugln &"      IP: {frame.ip:#018x}"
+  debugln &"      CS: {frame.cs:#018x}"
+  debugln &"   Flags: {frame.flags:#018x}"
+  debugln &"      SP: {frame.sp:#018x}"
+  debugln &"      SS: {frame.ss:#018x}"
   debugln ""
   debugln getStackTrace()
   quit()
@@ -99,11 +124,11 @@ template createHandler*(name: untyped, msg: string) =
     debugln "CPU Exception: ", msg
     debugln ""
     debugln "  Interrupt Frame:"
-    debugln &"    IP: {frame.ip:#018x}"
-    debugln &"    CS: {frame.cs:#018x}"
-    debugln &"    Flags: {frame.flags:#018x}"
-    debugln &"    SP: {frame.sp:#018x}"
-    debugln &"    SS: {frame.ss:#018x}"
+    debugln &"      IP: {frame.ip:#018x}"
+    debugln &"      CS: {frame.cs:#018x}"
+    debugln &"   Flags: {frame.flags:#018x}"
+    debugln &"      SP: {frame.sp:#018x}"
+    debugln &"      SS: {frame.ss:#018x}"
     debugln ""
     debugln getStackTrace()
     quit()

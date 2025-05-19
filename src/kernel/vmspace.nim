@@ -36,11 +36,11 @@ let
   logger = DebugLogger(name: "vmspace")
 
 const
-  uSpace = VmSpace(
+  uSpace* = VmSpace(
     base: 0x0000000000001000'u64.VAddr,  # exclude the first page to trap null pointer dereferences
     limit: 0x00007fffffffffff'u64.VAddr,
   )
-  kSpace = VmSpace(
+  kSpace* = VmSpace(
     base: 0xffff800000000000'u64.VAddr,
     limit: 0xffffffffffffefff'u64.VAddr,  # exclude the last page to avoid address overflow/wraparound
   )
@@ -72,6 +72,40 @@ proc usAllocAt*(vaddr: VAddr, npages: uint64): VmRegion =
   assert vaddr.uint64 mod PageSize == 0, "vaddr must be page-aligned"
   let slice = usFreeList.reserve(vaddr.uint64, npages * PageSize)
   result = VmRegion(slice: slice)
+
+proc usAllocLayout*(request: VmSpaceLayoutRequest): VmSpaceLayoutResult =
+  ## Allocate a region of virtual memory space in the user space.
+  ## The regions must be disjoint.
+  
+  # Calculate the total spanning size of the requested regions. Ensure that the
+  # items are disjoint and in ascending order.
+  var lastEnd = 0.VAddr
+  var minStart, maxEnd = 0.VAddr
+  for item in request.items:
+    if item.start < lastEnd:
+      return VmSpaceLayoutResult(kind: eLeft, left: "Items are not disjoint")
+    lastEnd = item.start +! item.size
+    if item.start < minStart:
+      minStart = item.start
+    if item.start +! item.size > maxEnd:
+      maxEnd = item.start +! item.size
+
+  let totalSize = maxEnd -! minStart
+
+  # Find a free block of memory of at least `totalSize` bytes.
+  let baseOpt = usFreeList.find(totalSize)
+  if baseOpt.isNone:
+    return VmSpaceLayoutResult(kind: eLeft, left: "No free memory found to satisfy layout request")
+
+  let base = VAddr(baseOpt.get)
+
+  # Allocate the individual regions.
+  var regions: seq[VmRegion]
+  for item in request.items:
+    let region = usAllocAt(base +! item.start.uint64, item.size div PageSize)
+    regions.add(region)
+
+  result = VmSpaceLayoutResult(kind: eRight, right: regions)
 
 proc ksFree*(region: VmRegion) =
   ## Free a region of memory space in the kernel space.

@@ -5,7 +5,6 @@
 import common/pagetables
 import pmm
 import vmdefs
-import vmm  # TODO: remove this
 
 var
   logger = DebugLogger(name: "vmpagetbl")
@@ -21,11 +20,14 @@ const
   PTShift = 12
 
 type
-  PageTableIndex = object
-    pml4i: uint64
-    pdpi: uint64
-    pdi: uint64
-    pti: uint64
+  PageTableIndex* = object
+    pml4i*: uint64
+    pdpi*: uint64
+    pdi*: uint64
+    pti*: uint64
+
+proc `$`*(idx: PageTableIndex): string =
+  result = &"PageTableIndex(pml4i: {idx.pml4i}, pdpi: {idx.pdpi}, pdi: {idx.pdi}, pti: {idx.pti})"
 
 proc indexToVAddr*(idx: PageTableIndex): VAddr =
   ## Convert a page table index to a virtual address.
@@ -146,20 +148,20 @@ proc getOrCreateEntry[T, E](table: ptr T, index: uint64): ptr E =
     table[index].present = 1
   result = cast[ptr E](p2v(paddr))
 
-proc mapIntoPageTable*(pml4: ptr PML4Table, mapping: VmMapping) =
-  ## Update the page table for a given mapping.
-  if mapping.paddr.isNone and mapping.vmo.isNil:
-    raise newException(VmError, "Mapping requires either a physical address or a backing VmObject")
+type
+  PageTableWalker* = object
+    processPML4Entry*: proc (pml4e: ptr PML4Entry, idx: PageTableIndex)
+    processPDPTEntry*: proc (pdpe: ptr PDPTEntry, idx: PageTableIndex)
+    processPDEntry*: proc (pde: ptr PDEntry, idx: PageTableIndex)
+    processPTEntry*: proc (pte: ptr PTEntry, idx: PageTableIndex)
 
-  var paddrCurr = mapping.paddr
-  var vaddrCurr = mapping.region.start
-  var vaddrEnd = vaddrCurr +! mapping.region.size
-
-  let
-    write: uint64 = if pWrite in mapping.permissions: 1 else: 0
-    noExec: uint64 = if pExecute in mapping.permissions: 0 else: 1
-    user: uint64 = if mapping.privilege == pUser: 1 else: 0
-    mapped = VmOsData(mapped: 1)
+proc walkPageTable*(
+  pml4: ptr PML4Table,
+  startVAddr: VAddr,
+  endVAddr: VAddr,
+  walker: PageTableWalker
+) =
+  ## Walk the page table and call the callback for each entry.
 
   # Initialize previous index to an invalid value
   var prevIndex = PageTableIndex(
@@ -172,54 +174,95 @@ proc mapIntoPageTable*(pml4: ptr PML4Table, mapping: VmMapping) =
   var pd: ptr PDTable
   var pt: ptr PTable
 
-  while vaddrCurr < vaddrEnd:
-    let index = vaddrToIndex(vaddrCurr)
+  var currVAddr = startVAddr
+  while currVAddr < endVAddr:
+    let index = vaddrToIndex(currVAddr)
 
     # PML4Entry
     if index.pml4i != prevIndex.pml4i:
-      pml4[index.pml4i].write = write
-      pml4[index.pml4i].user = user
-      pml4[index.pml4i].osdata = mapped.value
+      if walker.processPML4Entry != nil:
+        walker.processPML4Entry(pml4[index.pml4i].addr, index)
       prevIndex.pml4i = index.pml4i
 
       pdpt = getOrCreateEntry[PML4Table, PDPTable](pml4, index.pml4i)
 
     # Page Directory Pointer Table
     if index.pdpi != prevIndex.pdpi:
-      pdpt[index.pdpi].write = write
-      pdpt[index.pdpi].user = user
-      pdpt[index.pdpi].osdata = mapped.value
+      if walker.processPDPTEntry != nil:
+        walker.processPDPTEntry(pdpt[index.pdpi].addr, index)
       prevIndex.pdpi = index.pdpi
 
       pd = getOrCreateEntry[PDPTable, PDTable](pdpt, index.pdpi)
 
     # Page Directory
     if index.pdi != prevIndex.pdi:
-      pd[index.pdi].write = write
-      pd[index.pdi].user = user
-      pd[index.pdi].osdata = mapped.value
+      if walker.processPDEntry != nil:
+        walker.processPDEntry(pd[index.pdi].addr, index)
       prevIndex.pdi = index.pdi
 
       pt = getOrCreateEntry[PDTable, PTable](pd, index.pdi)
 
     # Page Table
     if index.pti != prevIndex.pti:
-      pt[index.pti].write = write
-      pt[index.pti].user = user
-      pt[index.pti].xd = noExec
-      pt[index.pti].osdata = mapped.value
+      if walker.processPTEntry != nil:
+        walker.processPTEntry(pt[index.pti].addr, index)
       prevIndex.pti = index.pti
 
+    inc(currVAddr, PageSize)
+
+proc mapIntoPageTable*(pml4: ptr PML4Table, mapping: VmMapping) =
+  ## Update the page table for a given mapping.
+  if mapping.paddr.isNone and mapping.vmo.isNil:
+    raise newException(VmError, "Mapping requires either a physical address or a backing VmObject")
+
+  let
+    write: uint64 = if pWrite in mapping.permissions: 1 else: 0
+    noExec: uint64 = if pExecute in mapping.permissions: 0 else: 1
+    user: uint64 = if mapping.privilege == pUser: 1 else: 0
+    mapped = VmMappingOsData(mapped: 1)
+
+  var paddrCurr = mapping.paddr
+  var vaddrCurr = mapping.region.start
+  var vaddrEnd = vaddrCurr +! mapping.region.size
+
+  walkPageTable(pml4, vaddrCurr, vaddrEnd, PageTableWalker(
+    processPML4Entry: proc (pml4e: ptr PML4Entry, idx: PageTableIndex) =
+      pml4e.write = write
+      pml4e.user = user
+      pml4e.osdata = mapped.value
+    ,
+    processPDPTEntry: proc (pdpe: ptr PDPTEntry, idx: PageTableIndex) =
+      pdpe.write = write
+      pdpe.user = user
+      pdpe.osdata = mapped.value
+    ,
+    processPDEntry: proc (pde: ptr PDEntry, idx: PageTableIndex) =
+      pde.write = write
+      pde.user = user
+      pde.osdata = mapped.value
+    ,
+    processPTEntry: proc (pte: ptr PTEntry, idx: PageTableIndex) =
+      pte.write = write
+      pte.user = user
+      pte.xd = noExec
+      pte.osdata = mapped.value
       if paddrCurr.isSome:
-        pt[index.pti].present = 1
-        pt[index.pti].paddr = paddrCurr.get
+        pte.present = 1
+        pte.paddr = paddrCurr.get
         inc(paddrCurr.get, PageSize)
+        inc(vaddrCurr, PageSize)
       else:
-        pt[index.pti].present = 0
-        pt[index.pti].paddr = mapping.vmo.id  # used by the page fault handler to find the VMO
-
-    inc(vaddrCurr, PageSize)
-
+        pte.present = 0
+        pte.paddr = mapping.vmo.id  # used by the page fault handler to find the VMO
+      # invalidate tlb
+      let vaddrToInvalidate = vaddrCurr.uint64
+      asm """
+        invlpg [%0]
+        : 
+        : "r"(`vaddrToInvalidate`)
+        : "memory"
+      """
+  ))
 
 proc unmapFromPageTable*(pml4: ptr PML4Table, mapping: VmMapping) =
   ## Remove a mapping from the page table.

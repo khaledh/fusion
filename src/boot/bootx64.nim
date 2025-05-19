@@ -4,9 +4,8 @@
 
 import std/sets
 
-import common/[bootinfo, malloc, pagetables]
+import common/[bootinfo, debugcon, malloc, pagetables]
 import libc, uefi
-import kernel/debugcon
 import kernel/vmm
 
 const

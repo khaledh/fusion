@@ -1,5 +1,4 @@
 import condvars
-import debugcon
 import locks
 
 type

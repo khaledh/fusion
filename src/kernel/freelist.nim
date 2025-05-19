@@ -36,6 +36,8 @@ template `end`*(list: FreeList): uint64 = list.base + list.size
 template `end`*(node: FreeNode): uint64 = node.start + node.size
 template `end`*(slice: AllocatedSlice): uint64 = slice.start + slice.size
 
+proc dump*(list: FreeList)
+
 proc newFreeList*(base: uint64, size: uint64): FreeList =
   ## Create a new free list.
   var dummy = FreeNode()
@@ -127,7 +129,7 @@ proc reserve*(list: var FreeList, start, size: uint64): AllocatedSlice =
   result = AllocatedSlice(start: start, size: size)
 
   # carve out the slice from the free list
-  var node = list.first
+  var node = list.search
   while not node.isNil and not (node.start <= start and node.end >= start + size):
     node = node.next
   
@@ -164,6 +166,16 @@ proc reserve*(list: var FreeList, start, size: uint64): AllocatedSlice =
     if not node.next.isNil:
       node.next.prev = after
     node.next = after
+
+proc find*(list: FreeList, size: uint64): Option[uint64] =
+  ## Find a free block of memory of at least `size` bytes.
+  ## Returns the start address of the block; otherwise, `none` if no large enough block is found.
+  var node = list.search
+  while not node.isNil and node.size <= size:
+    node = node.next
+  if node.isNil:
+    return none(uint64)
+  return some(node.start)
 
 proc dump*(list: FreeList) =
   ## Dump the free list to the console.

@@ -4,7 +4,7 @@
 
 {.used.}
 
-import kernel/debugcon
+import common/debugcon
 
 when defined(Heap4M):
   const HeapSize = 1024 * 1024 * 4

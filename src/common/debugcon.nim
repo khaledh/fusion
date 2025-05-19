@@ -3,11 +3,11 @@
 ]#
 import std/strformat
 
-import ports
-
 type
   DebugLogger* = ref object
     name*: string
+
+const QemuDebugConPort = 0xe9
 
 # ansi color codes
 template dim*(): string = &"\e[38;5;{242}m"
@@ -38,13 +38,18 @@ proc bytesToBinSize*(size: uint64, unit: BinUnit = bDynamic): string =
   else:
     return &"{size div TiB} TiB"
 
-const DebugConPort = 0xe9
+proc portOut8(port: uint16, data: uint8) =
+  asm """
+    out %0, %1
+    :
+    :"Nd"(`port`), "a"(`data`)
+  """
 
 proc debug*(msgs: varargs[string]) =
   ## Send debug messages to the debug console port.
   for msg in msgs:
     for ch in msg:
-      portOut8(DebugConPort, ch.uint8)
+      portOut8(QemuDebugConPort, ch.uint8)
 
 proc debugln*(msgs: varargs[string]) =
   ## Send debug messages to the debug console port. A newline is appended at the end.

@@ -43,7 +43,7 @@ var
   pmalloc: PhysAlloc
   kspace*: VMAddressSpace
   uspace*: VMAddressSpace
-  kpml4*: ptr PML4Table
+  oldkpml4*: ptr PML4Table
 
 template `end`*(region: VMRegion): VAddr =
   region.start +! region.npages * PageSize
@@ -63,7 +63,7 @@ proc vmInit*(physMemoryVirtualBase: uint64, physAlloc: PhysAlloc) =
     maxAddress: UserSpaceMaxAddress,
     regions: @[],
   )
-  kpml4 = getActivePML4()
+  oldkpml4 = getActivePML4()
 
 proc vmAddRegion*(space: var VMAddressSpace, start: VAddr, npages: uint64) =
   space.regions.add VMRegion(start: start, npages: npages)
@@ -278,83 +278,3 @@ proc vmmap*(
 ): PAddr {.discardable.} =
   result = pmalloc(region.npages)
   mapRegion(pml4, region.start, result, region.npages, pageAccess, pageMode, noExec)
-
-####################################################################################################
-# Dump page tables
-####################################################################################################
-
-proc sar*(x: uint64, y: int): uint64 {.inline.} =
-  asm """
-    mov rcx, %1
-    sar %0, cl
-    : "+r"(`x`)
-    : "r"(`y`)
-    : "rcx"
-  """
-  result = x
-
-proc dumpPageTable*(pml4: ptr PML4Table) =
-  var virt: VAddr
-  var phys: PAddr
-
-  virt = cast[VAddr](pml4.entries.addr)
-  debugln &"PML4: virt = {virt.uint64:#018x}"
-  phys = v2p(virt).get
-  debugln &"PML4: phys = {phys.uint64:#010x} (virt = {virt.uint64:#018x})"
-  for pml4Index in 0 ..< 512.uint64:
-    if pml4.entries[pml4Index].present == 1:
-      phys = PAddr(pml4.entries[pml4Index].physAddress shl 12)
-      virt = p2v(phys)
-      var pml4mapped = pml4Index.uint64 shl (39 + 16)
-      pml4mapped = sar(pml4mapped, 16)
-      debugln &"  [{pml4Index:>03}] [{pml4mapped:#018x}]    PDPT: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pml4.entries[pml4Index].user} write={pml4.entries[pml4Index].write} nx={pml4.entries[pml4Index].xd} present={pml4.entries[pml4Index].present}"
-      let pdpt = cast[ptr PDPTable](virt)
-      for pdptIndex in 0 ..< 512:
-        if pdpt.entries[pdptIndex].present == 1:
-          phys = PAddr(pdpt.entries[pdptIndex].physAddress shl 12)
-          virt = p2v(phys)
-          let pdptmapped = pml4mapped or (pdptIndex.uint64 shl 30)
-          debugln &"    [{pdptIndex:>03}] [{pdptmapped:#018x}]    PD: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pdpt.entries[pdptIndex].user} write={pdpt.entries[pdptIndex].write} nx={pdpt.entries[pdptIndex].xd} present={pdpt.entries[pdptIndex].present}"
-          let pd = cast[ptr PDTable](virt)
-          for pdIndex in 0 ..< 512:
-            if pd.entries[pdIndex].present == 1:
-              phys = PAddr(pd.entries[pdIndex].physAddress shl 12)
-              # debugln &"  ptPhys = {phys.uint64:#010x}"
-              virt = p2v(phys)
-              # debugln &"  ptVirt = {virt.uint64:#018x}"
-              let pdmapped = pdptmapped or (pdIndex.uint64 shl 21)
-              debugln &"      [{pdIndex:>03}] [{pdmapped:#018x}]  PT: phys = {phys.uint64:#018x} (virt = {virt.uint64:#018x})  user={pd.entries[pdIndex].user} write={pd.entries[pdIndex].write} nx={pd.entries[pdIndex].xd} present={pd.entries[pdIndex].present}"
-              let pt = cast[ptr PTable](virt)
-              for ptIndex in 0 ..< 512:
-                var first = false
-                if pt.entries[ptIndex].present == 1:
-                  if (ptIndex == 0 or ptIndex == 511 or (pt.entries[ptIndex-1].present == 0) or
-                     (pt.entries[ptIndex+1].present == 0) or
-                     (pt.entries[ptIndex-1].xd != pt.entries[ptIndex].xd) or
-                     (pt.entries[ptIndex+1].xd != pt.entries[ptIndex].xd)
-                  ):
-                    phys = PAddr(pt.entries[ptIndex].physAddress shl 12)
-                    # debugln &"  pagePhys = {phys.uint64:#010x}"
-                    virt = p2v(phys)
-                    # debugln &"  pageVirt = {virt.uint64:#018x}"
-                    let ptmapped = pdmapped or (ptIndex.uint64 shl 12)
-                    debugln &"        \x1b[1;31m[{ptIndex:>03}] [{ptmapped:#018x}] P: phys = {phys.uint64:#018x}                              user={pt.entries[ptIndex].user} write={pt.entries[ptIndex].write} nx={pt.entries[ptIndex].xd} present={pt.entries[ptIndex].present}\x1b[1;0m"
-                    if ptIndex == 0 or (pt.entries[ptIndex-1].present == 0) or pt.entries[ptIndex-1].xd != pt.entries[ptIndex].xd:
-                      first = true
-                  if first and ptIndex < 511 and pt.entries[ptIndex+1].present == 1 and pt.entries[ptIndex+1].xd == pt.entries[ptIndex].xd:
-                    debugln "        ..."
-                    first = false
-
-# proc printVMRegions*(memoryMap: MemoryMap) =
-#   debug &"""   {"Start":>20}"""
-#   debug &"""   {"Type":12}"""
-#   debug &"""   {"VM Size (KB)":>12}"""
-#   debug &"""   {"#Pages":>9}"""
-#   debugln ""
-#   for i in 0 ..< memoryMap.len:
-#     let entry = memoryMap.entries[i]
-#     debug &"   {entry.start:>#20x}"
-#     debug &"   {entry.type:#12}"
-#     debug &"   {entry.nframes * 4:>#12}"
-#     debug &"   {entry.nframes:>#9}"
-#     debugln ""

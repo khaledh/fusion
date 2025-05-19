@@ -1,6 +1,16 @@
 import std/tables
 
+import elf
 import freelist
+
+######################## v2p/p2v Definitions ########################
+
+var
+  p2v*: proc (paddr: PAddr): VAddr
+    ## Convert a physical address to a kernel virtual address.
+  v2p*: proc (vaddr: VAddr): Option[PAddr]
+    ## Convert a virtual address to a physical address using the active page table.
+    ## Returns None if the address is not mapped.
 
 ######################## VmSpace Definitions ########################
 
@@ -13,7 +23,19 @@ type
   VmRegion* = object
     ## A contiguous region of virtual memory allocated within a space.
     slice*: AllocatedSlice  # private (see `start` and `npages` public templates)
-  
+
+  VmSpaceLayoutRequest* = object
+    ## A request for a allocating multiple related regions (e.g., ELF segments).
+    ## The regions must be disjoint.
+    items*: seq[VmSpaceLayoutItem]
+
+  VmSpaceLayoutItem* = object
+    ## An item in the layout.
+    start*: VAddr
+    size*: uint64
+
+  VmSpaceLayoutResult* = Either[string, seq[VmRegion]]
+
 proc size*(space: VmSpace): uint64 {.inline.} = space.limit -! space.base + 1
 
 template start*(region: VmRegion): VAddr = region.slice.start.VAddr
@@ -21,27 +43,46 @@ template `end`*(region: VmRegion): VAddr = region.slice.end.VAddr
 template npages*(region: VmRegion): uint64 = region.slice.size div PageSize
 template size*(region: VmRegion): uint64 = region.slice.size
 
+######################## ElfReloInfo (for VmObject) ########################
+
+type
+  ElfReloInfo* = object
+    loadBase*: VAddr                               ## Base address of the loaded ELF image
+    pageEntries*: TableRef[uint64, seq[RelaEntry]] ## page index -> relocation entries
+
 ######################## VmObject Definitions ########################
 
 type
+  VmObjectKind* = enum
+    vmObjectPinned
+    vmObjectPageable
+    vmObjectElfSegment
+
+
   VmObject* = ref object of RootObj
     ## A virtual memory object that can be mapped into a region of virtual memory.
-    id*: uint64                     ## Unique identifier
-    size*: uint64                   ## Memory size of the object (page aligned)
+    id*: uint64                        ## Unique identifier
+    size*: uint64                      ## Memory size of the object (page aligned)
+    pageMap*: TableRef[uint64, PAddr]  ## Mapping of page indices to physical addresses
+    pager*: VmObjectPagerProc          ## Pager proc for the object (if pageable)
 
-  PinnedVmObject* = ref object of VmObject
-    ## A VmObject that is pinned in memory.
-    paddr*: PAddr
+    case kind*: VmObjectKind
+    of vmObjectPinned:
+      ## A VmObject that is pinned in memory.
+      paddr*: PAddr
+    of vmObjectPageable: # For anonymous, non-ELF pageable memory
+      ## A VmObject backed by a source (anonymous, file, etc.) that can be mapped into
+      ## a region of virtual memory, and paged in/out as needed.
+      rc*: int                        ## Reference count (how many tasks are using this object)
+    of vmObjectElfSegment:
+      image*: ElfImage           ## The original ELF image in memory
+      ph*: ptr ElfProgramHeader  ## ELF program header corresponding to this segment
+      relo*: ElfReloInfo         ## Relocation info for the whole image (shared across segments)
+      rcSeg*: int                ## Ref count of the segment
 
-  PageableVmObject* = ref object of VmObject
-    ## A virtual memory object backed by a source (anonymous, file, etc.) that can be mapped into
-    ## a region of virtual memory, and paged in/out as needed.
-    rc*: int                        ## Reference count (how many tasks are using this object)
-    pageMap*: Table[uint64, PAddr]  ## Mapping of page indices to physical addresses
-    pager*: VmObjectPagerProc       ## Pager procedure for the object
 
   VmObjectPagerProc* = proc(
-    vmobj: PageableVmObject,  ## The VmObject
+    vmo: VmObject,            ## The VmObject
     offset: uint64,           ## Offset of the page in the VmObject
     npages: uint64,           ## Number of pages to page in (typically 1, but can be more for prefetching)
   ): PAddr
@@ -53,13 +94,13 @@ type
 ####################### VmMapping Definitions #######################
 
 type
-  VmPermission* = enum
+  VmMappingPermission* = enum
     pRead
     pWrite
     pExecute
-  VmPermissions* = set[VmPermission]
+  VmMappingPermissions* = set[VmMappingPermission]
 
-  VmPrivilege* = enum
+  VmMappingPrivilege* = enum
     pUser
     pSupervisor
 
@@ -69,7 +110,7 @@ type
     vmShared         # Changes are visible to all sharers
   VmMappingFlags* = set[VmMappingFlag]
 
-  VmOsData* = object
+  VmMappingOsData* = object
     ## This maps to 11 bits in the page table entries (ignored by the MMU)
     ## and can be used by the OS to store any OS-specific data.
     mapped*   {.bitsize:  1.}: uint64  # present=0 and mapped=1 means the page is mapped but not present in memory
@@ -86,12 +127,32 @@ type
     offset*: uint64              ## Offset within the VmObject where mapping begins (usually 0)
 
     # How this task can access this mapping
-    permissions*: VmPermissions  ## Read, Write, Execute
-    privilege*: VmPrivilege      ## User or Supervisor
-    flags*: VmMappingFlags       ## e.g., Shared, CoW
-    osdata*: VmOsData            ## OS-specific data for the mapping
+    permissions*: VmMappingPermissions  ## Read, Write, Execute
+    privilege*: VmMappingPrivilege      ## User or Supervisor
+    flags*: VmMappingFlags              ## e.g., Shared, CoW
+    osdata*: VmMappingOsData            ## OS-specific data for the mapping
+  
+  VmMappingRequest* = object
+    vmo*: VmObject
+    offset*: uint64
+    permissions*: VmMappingPermissions
+    privilege*: VmMappingPrivilege
+    flags*: VmMappingFlags
+    osdata*: VmMappingOsData
+  
+  VmMappingLayoutRequest* = object
+    items*: seq[VmMappingLayoutItem]
 
-proc value*(osdata: VmOsData): uint64 = cast[uint64](osdata)
+  VmMappingLayoutItem* = object
+    start*: VAddr # ELF-relative start for ELF segments, or absolute for others
+    size*: uint64
+    vmo*: VmObject # The VMO to map, pre-configured
+    offset*: uint64 # Offset within VMO to start mapping
+    permissions*: VmMappingPermissions
+
+  VmMappingLayoutResult* = Either[string, seq[VmMapping]]
+
+proc value*(osdata: VmMappingOsData): uint64 = cast[uint64](osdata)
 
 #################################### Errors ####################################
 

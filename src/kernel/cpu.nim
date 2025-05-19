@@ -43,6 +43,12 @@ proc readTSC*(): uint64 =
   """
   result = (edx.uint64 shl 32) or eax
 
+proc readCR2*(): uint64 =
+  asm """
+    mov %0, cr2
+    : "=r"(`result`)
+  """
+
 proc idle*() {.cdecl.} =
   while true:
     asm """
