@@ -6,6 +6,25 @@ import elf
 
 var
   vmObjects: seq[VmObject]
+  elfSegments: TableRef[(PAddr, uint64), VmObject]  # (image base, segment offset) -> VmObject
+
+proc initVmObjects*() =
+  vmObjects = newSeq[VmObject]()
+  elfSegments = newTable[(PAddr, uint64), VmObject]()
+
+proc cleanupVmObject*(vmo: VmObject) =
+  ## Clean up a VmObject when it's no longer needed.
+  ## For ELF segments, this will decrement the reference count and remove from the global table if needed.
+  case vmo.kind
+  of vmObjectElfSegment:
+    dec vmo.rcSeg
+    if vmo.rcSeg == 0:
+      # Remove from global table if it's a read-only segment
+      if Readable in vmo.ph.flags and not (Writable in vmo.ph.flags):
+        let key = (cast[PAddr](vmo.image.base), vmo.ph.offset)
+        elfSegments.del(key)
+  else:
+    discard
 
 proc nextVmObjectId(): uint64 =
   result = vmObjects.len.uint64
@@ -67,6 +86,17 @@ proc newElfSegmentVmObject*(
   pager: VmObjectPagerProc,
 ): VmObject =
   ## Create a new VmObject for an ELF segment.
+  ## For read-only segments, this will reuse an existing VmObject if one exists.
+  
+  # For read-only segments, check if we already have a VmObject for this segment
+  if Readable in ph.flags and not (Writable in ph.flags):
+    let key = (cast[PAddr](image.base), ph.offset)
+    if elfSegments.hasKey(key):
+      let existingVmo = elfSegments[key]
+      inc existingVmo.rcSeg  # Increment reference count
+      return existingVmo
+
+  # Create new VmObject for writable segments or if no existing one found
   result = VmObject(
     kind: vmObjectElfSegment,
     id: nextVmObjectId(),
@@ -78,3 +108,8 @@ proc newElfSegmentVmObject*(
     rcSeg: 1,
   )
   vmObjects.add(result)
+
+  # For read-only segments, store in the global table
+  if Readable in ph.flags and not (Writable in ph.flags):
+    let key = (cast[PAddr](image.base), ph.offset)
+    elfSegments[key] = result

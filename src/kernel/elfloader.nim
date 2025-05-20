@@ -176,7 +176,12 @@ proc pageInElfSegment*(vmo: VmObject, offsetInVmo: uint64, npagesToLoad: uint64)
   assert npagesToLoad == 1, "npagesToLoad > 1 is not supported yet"
 
   # Note: offsetInVmo is relative to segment start offset rounded down to a page start
-  # logger.info &"  offsetInVmo: {offsetInVmo:#x}"
+  # logger.info &"vmo.id: {vmo.id}, offsetInVmo: {offsetInVmo:#x}"
+
+  # Check if the page is already in memory, if so, return the physical address
+  let pageIndex = offsetInVmo div PageSize
+  if vmo.pageMap.hasKey(pageIndex):
+    return vmo.pageMap[pageIndex]
 
   # Calculate the file offset
   let offsetInFile = roundDownToPage(vmo.ph.offset) + offsetInVmo
@@ -196,8 +201,8 @@ proc pageInElfSegment*(vmo: VmObject, offsetInVmo: uint64, npagesToLoad: uint64)
   let bytesToCopy = intersection.right - intersection.left
 
   # Allocate a physical page (the page is zero-filled by default)
-  # logger.info &"  Allocating physical page"
   let paddr = pmAlloc(1)
+  logger.info &"  Allocated physical page at {paddr.uint64:#x}"
 
   # Copy the data from the ELF image to the physical page (if needed)
   if bytesToCopy > 0:
@@ -211,6 +216,9 @@ proc pageInElfSegment*(vmo: VmObject, offsetInVmo: uint64, npagesToLoad: uint64)
   else:
     # logger.info &"  No data to copy"
     discard
+
+  # Add the page to the page map
+  vmo.pageMap[pageIndex] = paddr
 
   result = paddr
 

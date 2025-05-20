@@ -11,7 +11,7 @@ import gdt
 import sched
 import timer
 import task
-import vmdefs, vmmgr, vmpagetbl, vmspace
+import vmdefs, vmmgr, vmpagetbl, vmspace, vmobject
 
 
 let
@@ -254,9 +254,12 @@ proc sleep*(durationMs: uint64) =
 proc terminate*() =
   var task = sched.getCurrentTask()
   logger.info &"terminating task {task.id}"
+
+  # Clean up VmObjects
+  for mapping in task.vmMappings:
+    cleanupVmObject(mapping.vmo)
+
   task.state = TaskState.Terminated
-  # vmfree(task.space, task.ustack.data, task.ustack.size div PageSize)
-  # vmfree(task.space, task.kstack.data, task.kstack.size div PageSize)
   sched.removeTask(task)
   sched.schedule()
 

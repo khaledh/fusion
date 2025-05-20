@@ -530,6 +530,9 @@ proc vmmgrInit*(
   p2v = kP2V  # physical to kernel virtual
   v2p = kV2P  # virtual to physical (using the active page table)
 
+  # Initialize VmObjects system
+  initVmObjects()
+
   # Create the kernel page table
   kpml4 = newPageTable()
 
