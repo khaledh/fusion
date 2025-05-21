@@ -27,16 +27,16 @@ The following features are currently implemented:
   - Single Address Space
   - Physical Memory Manager
   - Virtual Memory Manager
+  - Demand Paging
   - Higher Half Kernel
 - Task Management
   - Kernel Tasks
   - User Mode Tasks
   - Preemptive Multitasking
   - Priority-based Scheduling
-  - ELF Loader
+  - ELF Loader (Demand Paged, Relocation)
 - System Calls
   - System Call Interface
-  - SYSCALL/SYSRET
   - User Mode Library
 - IPC
   - Synchronization Primitives
@@ -51,7 +51,6 @@ The following features are currently implemented:
 
 - Capability-based Security
 - Event-based Task State Machines
-- Demand Paging
 - Disk I/O
 - File System
 - Keyboard/Mouse Input
