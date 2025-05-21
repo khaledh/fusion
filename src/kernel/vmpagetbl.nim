@@ -227,22 +227,22 @@ proc mapIntoPageTable*(pml4: ptr PML4Table, mapping: VmMapping) =
 
   walkPageTable(pml4, vaddrCurr, vaddrEnd, PageTableWalker(
     processPML4Entry: proc (pml4e: ptr PML4Entry, idx: PageTableIndex) =
-      pml4e.write = write
+      pml4e.write = pml4e.write or write  # preserve existing write permissions at higher levels
       pml4e.user = user
       pml4e.osdata = mapped.value
     ,
     processPDPTEntry: proc (pdpe: ptr PDPTEntry, idx: PageTableIndex) =
-      pdpe.write = write
+      pdpe.write = pdpe.write or write  # preserve existing write permissions at higher levels
       pdpe.user = user
       pdpe.osdata = mapped.value
     ,
     processPDEntry: proc (pde: ptr PDEntry, idx: PageTableIndex) =
-      pde.write = write
+      pde.write = pde.write or write  # preserve existing write permissions at higher levels
       pde.user = user
       pde.osdata = mapped.value
     ,
     processPTEntry: proc (pte: ptr PTEntry, idx: PageTableIndex) =
-      pte.write = write
+      pte.write = pte.write or write  # preserve existing write permissions at higher levels
       pte.user = user
       pte.xd = noExec
       pte.osdata = mapped.value

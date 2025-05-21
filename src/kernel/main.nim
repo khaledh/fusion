@@ -87,21 +87,21 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.info ""
   logger.info &"{dim()}========== for testing =========={undim()}"
 
-  # # test channel
-  # logger.info "creating a channel"
-  # let ch = channels.create(msgSize = sizeof(int))
-  #
-  # proc sendAlloc(size: int): pointer =
-  #   result = channels.alloc(ch.id, size)
-  #
-  # let packedObj = serialize(">> \e[91mping from kernel\e[0m", sendAlloc)
-  # let size = sizeof(packedObj.len) + packedObj.len
-  # let msg = Message(len: size, data: cast[ptr UncheckedArray[byte]](packedObj))
-  #
-  # discard channels.send(ch.id, msg)
+  # test channel
+  logger.info "creating a channel"
+  let ch = channels.create(msgSize = sizeof(int))
+  
+  proc sendAlloc(size: int): pointer =
+    result = channels.alloc(ch.id, size)
+  
+  let packedObj = serialize(">> \e[91mping from kernel\e[0m", sendAlloc)
+  let size = sizeof(packedObj.len) + packedObj.len
+  let msg = Message(len: size, data: cast[ptr UncheckedArray[byte]](packedObj))
+  
+  discard channels.send(ch.id, msg)
 
-  # test user tasks
-  # logger.info &"creating two user tasks"
+  #test user tasks
+  logger.info &"creating two user tasks"
 
   var utask1 = createUserTask(
     imagePhysAddr = userImagePhysicalBase,

@@ -1,16 +1,8 @@
 import std/tables
 
+import common/pagetables
 import elf
 import freelist
-
-######################## v2p/p2v Definitions ########################
-
-var
-  p2v*: proc (paddr: PAddr): VAddr
-    ## Convert a physical address to a kernel virtual address.
-  v2p*: proc (vaddr: VAddr): Option[PAddr]
-    ## Convert a virtual address to a physical address using the active page table.
-    ## Returns None if the address is not mapped.
 
 ######################## VmSpace Definitions ########################
 
@@ -160,3 +152,14 @@ type
   VmError* = object of CatchableError
   OutOfVirtualMemoryError* = object of VmError
     ## An error raised when a region of virtual memory cannot be allocated.
+
+######################## Vars Definitions ########################
+
+var
+  p2v*: proc (paddr: PAddr): VAddr
+    ## Convert a physical address to a kernel virtual address.
+  v2p*: proc (vaddr: VAddr): Option[PAddr]
+    ## Convert a virtual address to a physical address using the active page table.
+    ## Returns None if the address is not mapped.
+  kpml4*: ptr PML4Table
+  kvmMappings*: seq[VmMapping]

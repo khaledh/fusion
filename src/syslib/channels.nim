@@ -142,6 +142,4 @@ proc recv*[T](cid: int, data: var T): int =
     logger.info &"recv: error receiving data from channel {cid}: {result}"
     return
 
-  logger.info &"recv: received data from channel {cid}: {len}"
   data = deserialize(packedObj)
-  logger.info &"recv: deserialized data from channel {cid}: {data}"

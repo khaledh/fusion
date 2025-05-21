@@ -176,7 +176,7 @@ proc createUserTask*(
 type
   KernelProc* = proc () {.cdecl.}
 
-proc terminate*()
+proc terminate*() {.exportc.}
 
 proc kernelTaskWrapper*(kproc: KernelProc) =
   logger.info &"starting kernel task \"{getCurrentTask().name}\""
@@ -251,7 +251,7 @@ proc sleep*(durationMs: uint64) =
   sched.removeTask(task)
   sched.schedule()
 
-proc terminate*() =
+proc terminate*() {.exportc.} =
   var task = sched.getCurrentTask()
   logger.info &"terminating task {task.id}"
 

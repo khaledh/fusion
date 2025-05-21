@@ -39,6 +39,10 @@ proc anonVmObjectPageIn*(vmobj: VmObject, offset: uint64, npages: uint64): PAddr
   ## Pager procedure for an anonymous VmObject.
   ##
   ## It simply allocates physical memory for the page(s) and returns the physical address.
+  # Check if the page is already in memory
+  if vmobj.pageMap.hasKey(offset):
+    return vmobj.pageMap[offset]
+
   result = pmAlloc(npages)
   var pageIndex = offset div PageSize
   for i in 0 ..< npages:
