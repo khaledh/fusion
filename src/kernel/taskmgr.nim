@@ -174,16 +174,21 @@ proc createUserTask*(
 ########################################################
 
 type
-  KernelProc* = proc () {.cdecl.}
+  KernelProc* = proc (chid: int) {.cdecl.}
 
 proc terminate*() {.exportc.}
 
-proc kernelTaskWrapper*(kproc: KernelProc) =
+proc kernelTaskWrapper*(kproc: KernelProc, chid: int) =
   logger.info &"starting kernel task \"{getCurrentTask().name}\""
-  kproc()
+  kproc(chid)
   terminate()
 
-proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPriority = 0): Task =
+proc createKernelTask*(
+  kproc: KernelProc,
+  name: string = "",
+  chid: int = -1,
+  priority: TaskPriority = 0
+): Task =
 
   var pml4 = getActivePageTable()
 
@@ -210,6 +215,7 @@ proc createKernelTask*(kproc: KernelProc, name: string = "", priority: TaskPrior
   var regs = cast[ptr TaskRegs](regsAddr)
   zeroMem(regs, sizeof(TaskRegs))
   regs.rdi = cast[uint64](kproc)  # pass kproc as an argument to kernelTaskWrapper
+  regs.rsi = cast[uint64](chid)   # pass chid (second param)
 
   let taskId = nextTaskId
   inc nextTaskId

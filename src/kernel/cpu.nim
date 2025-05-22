@@ -49,7 +49,7 @@ proc readCR2*(): uint64 =
     : "=r"(`result`)
   """
 
-proc idle*() {.cdecl.} =
+proc idle*(chid: int) {.cdecl.} =
   while true:
     asm """
       sti

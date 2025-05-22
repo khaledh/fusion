@@ -69,10 +69,6 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   pci.showPciConfig()
   devmgrInit()
 
-  logger.info "init console"
-  console.init()
-  console.write("Fusion OS")
-
   logger.info "init timer"
   timerInit()
 
@@ -84,8 +80,25 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
 
   var idleTask = createKernelTask(cpu.idle, "idle", TaskPriority.low)
 
+  logger.info "creating console channel"
+  let consoleCh = channels.create(msgSize = sizeof(int))
+  logger.info &"console channel id: {consoleCh.id}"
+
+  proc sendAlloc(size: int): pointer =
+    result = channels.alloc(consoleCh.id, size)
+  
+  let packedObj = serialize("Hello from kernel\n", sendAlloc)
+  let size = sizeof(packedObj.len) + packedObj.len
+  let msg = Message(len: size, data: cast[ptr UncheckedArray[byte]](packedObj))
+  
+  discard channels.send(consoleCh.id, msg)
+
+  logger.info "init console"
+  let consoleTask = createKernelTask(console.start, "console", consoleCh.id)
+
   logger.info "init scheduler"
-  schedInit([])
+  schedInit([consoleTask])
+
 
   ############### testing #######################################################
   logger.info ""
@@ -93,16 +106,17 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
 
   # test channel
   logger.info "creating a channel"
-  let ch = channels.create(msgSize = sizeof(int))
+  let testCh = channels.create(msgSize = sizeof(int))
+  logger.info &"test channel id: {testCh.id}"
   
-  proc sendAlloc(size: int): pointer =
-    result = channels.alloc(ch.id, size)
+  # proc sendAlloc(size: int): pointer =
+  #   result = channels.alloc(testCh.id, size)
   
-  let packedObj = serialize(">> \e[91mping from kernel\e[0m", sendAlloc)
-  let size = sizeof(packedObj.len) + packedObj.len
-  let msg = Message(len: size, data: cast[ptr UncheckedArray[byte]](packedObj))
+  let packedObj1 = serialize(">> \e[91mping from kernel\e[0m", sendAlloc)
+  let size1 = sizeof(packedObj1.len) + packedObj1.len
+  let msg1 = Message(len: size1, data: cast[ptr UncheckedArray[byte]](packedObj1))
   
-  discard channels.send(ch.id, msg)
+  discard channels.send(testCh.id, msg1)
 
   #test user tasks
   logger.info &"creating two user tasks"

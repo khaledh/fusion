@@ -2,6 +2,8 @@
     Console support for kernel messages
 ]#
 
+import common/serde
+import channels
 import framebuffer as fb
 import font
 
@@ -14,18 +16,19 @@ const
 
 var
   maxCols, maxRows = 0
-  row, col = 0  # cursor position
+  curRow, curCol = 0  # cursor position
   leftPadding, rightPadding = 6
   topPadding, bottomPadding = 6
 
 proc moveCursor*(x, y: int) =
-  col = x
-  row = y
+  curCol = x
+  curRow = y
 
-proc cur2pix*(x, y: int): (int, int) =
-  (leftPadding + x * FontWidth, topPadding + y * FontHeight)
+proc cur2px*(row, col: int): (int, int) =
+  (leftPadding + col * FontWidth, topPadding + row * FontHeight)
 
-proc putChar*(x, y: int, c: char, color: uint32 = ForegroundColor) =
+proc putChar*(row, col: int, c: char, color: uint32 = ForegroundColor) =
+  let (x, y) = cur2px(row, col)
   let glyph = getGlyph(c)
   for i in 0 ..< FontHeight:
     for j in 0 ..< FontWidth:
@@ -34,18 +37,32 @@ proc putChar*(x, y: int, c: char, color: uint32 = ForegroundColor) =
         fb.putPixel(x + j, y + i, color)
 
 
-proc putString*(x, y: int, s: string, color: uint32 = ForegroundColor): (int, int) =
+proc putString*(row, col: int, s: string, color: uint32 = ForegroundColor): (int, int) =
+  var (r, c) = (row, col)
   for i in 0 ..< s.len:
-    putChar(x + i * FontWidth, y, s[i], color)
-  (x + s.len * FontWidth, y)
+    if s[i] == '\n':
+      r += 1
+      c = 0
+    else:
+      putChar(r, c, s[i], color)
+      c += 1
+  (r, c)
 
 proc write*(s: string, color: uint32 = ForegroundColor) =
-  let (x, y) = cur2pix(col, row)
-  (col, row) = putString(x, y, s, color)
+  (curRow, curCol) = putString(curRow, curCol, s, color)
 
-proc init*() =
+proc start*(chid: int) {.cdecl.} =
+  ## Start the console task and wait for messages from the channel.
+  logger.info &"starting console task with chid: {chid}"
   fb.init()
   fb.clear(BackgroundColor)
   maxCols = (fb.getWidth() - leftPadding - rightPadding) div FontWidth
   maxRows = (fb.getHeight() - topPadding - bottomPadding) div FontHeight
   logger.info &"console size: {maxCols} x {maxRows}"
+
+  while true:
+    let msg = channels.recv(chid)
+    let data = deserialize(cast[ptr PackedObj](msg.data))
+    logger.info &"Received message of length: {data.len}"
+    if data.len > 0:
+      write(data)
