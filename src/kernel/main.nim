@@ -5,7 +5,7 @@
 import common/[bootinfo, libc, malloc, serde]
 import
   channels, cpu, ctxswitch, devmgr, drivers/pci, idt, lapic,
-  gdt, pmm, sched, syscalls, task, taskmgr, timer, vmmgr
+  gdt, pmm, sched, syscalls, task, taskmgr, timer, vmmgr, con/console
 
 const KernelVersion = "0.2.0"
 
@@ -68,6 +68,10 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
 
   pci.showPciConfig()
   devmgrInit()
+
+  logger.info "init console"
+  console.init()
+  console.write("Fusion OS")
 
   logger.info "init timer"
   timerInit()

@@ -3,10 +3,9 @@
 ]#
 import std/strformat
 
-import common/pagetables
 import pci
-import ../ports
-import ../vmm
+import ports
+import vmdefs, vmmgr
 
 const
   BgaPortIndex               = 0x1ce
@@ -89,24 +88,16 @@ proc bgaSetYOffset*(offset: uint16) =
 
 proc mapFramebuffer*(width, height: uint32): tuple[virtAddr: uint64, numPages: uint64] =
   let numPages = (width.uint64 * height.uint64 * 4 + (PageSize - 1)) div PageSize
-  let vmRegion = vmalloc(kspace, numPages)
-  mapRegion(
-    pml4 = getActivePML4(),
-    virtAddr = vmRegion.start,
-    physAddr = fbPhysAddr.PAddr,
-    pageCount = numPages,
-    pageAccess = paReadWrite,
-    pageMode = pmSupervisor,
-    noExec = true
+  let mapping = kvMapAt(
+    paddr = fbPhysAddr.PAddr,
+    npages = numPages,
+    perms = {pRead, pWrite},
+    flags = {vmPrivate},
   )
-  result = (vmRegion.start.uint64, numPages)
+  result = (mapping.region.start.uint64, numPages)
 
 proc unmapFramebuffer*(virtAddr, numPages: uint64) =
-    unmapRegion(
-      pml4 = getActivePML4(),
-      virtAddr = virtAddr.VAddr,
-      pageCount = numPages,
-    )
+    discard
 
 proc setResolution*(xres, yres: uint16) =
   logger.info &"setting resolution to {xres}x{yres}"
