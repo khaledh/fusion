@@ -6,6 +6,7 @@ import common/serde
 import channels
 import framebuffer as fb
 import font
+import sched
 
 let
   logger = DebugLogger(name: "console")
@@ -29,7 +30,7 @@ proc cur2px*(row, col: int): (int, int) =
   (leftPadding + col * curFont.width, topPadding + row * curFont.height)
 
 proc putChar*(row, col: int, c: char, color: uint32 = ForegroundColor) =
-  let (x, y) = cur2px(row, col)
+  let (x, y) = cur2px(row, col)  
   let glyph = getGlyph(curFont, c)
   for i in 0 ..< curFont.height:
     for j in 0 ..< curFont.width:
@@ -52,16 +53,21 @@ proc write*(s: string, color: uint32 = ForegroundColor) =
 
 proc start*(chid: int) {.cdecl.} =
   ## Start the console task and wait for messages from the channel.
-  logger.info &"starting console task with chid: {chid}"
+
+  # initialize the framebuffer
   fb.init()
   fb.clear(BackgroundColor)
   maxCols = (fb.getWidth() - leftPadding - rightPadding) div curFont.width
   maxRows = (fb.getHeight() - topPadding - bottomPadding) div curFont.height
   logger.info &"console size: {maxCols} x {maxRows}"
 
+  # create a channel to receive messages for display
+  let cid = channels.create[FString](getCurrentTask(), mode = ChannelMode.Read)
+  logger.info &"console channel id: {cid}"
+
   while true:
-    let msg = channels.recv(chid)
-    let data = deserialize(cast[ptr PackedObj](msg.data))
-    logger.info &"Received message of length: {data.len}"
-    if data.len > 0:
-      write(data)
+    let msgOpt = channels.recv[FString](cid)
+    if msgOpt.isSome:
+      write(msgOpt.get)
+    else:
+      logger.info &"console: received `none` from channel {cid}"

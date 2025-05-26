@@ -96,7 +96,7 @@ proc pageFaultHandler*(frame: ptr InterruptFrame, errorCode: uint64)
     logger.info &"Page fault at {cr2:#018x} but no VmMapping found for task {taskId}. Terminating task."
     # print the mappings
     for mapping in vmMappings:
-      logger.info &"    {mapping.region.start.uint64:#x} - {mapping.region.end.uint64:#x} (VMO ID: {mapping.vmo.id})"
+      logger.info &"    {mapping.region.start.uint64:#x} - {mapping.region.end.uint64:#x} (VMO ID: {mapping.vmo.id}) {mapping.permissions}"
     # TODO: Terminate current task
     printRegisters(frame)
     quit()

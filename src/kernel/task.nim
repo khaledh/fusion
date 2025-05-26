@@ -17,7 +17,7 @@ type
 
   Task* = ref object
     rsp*: uint64  # must be first field (inline assembly in ctxswitch expects this)
-    id*: uint64
+    id*: int
     name*: string
     priority*: TaskPriority
     state*: TaskState

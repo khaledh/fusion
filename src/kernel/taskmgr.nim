@@ -27,7 +27,8 @@ const
 var
   tasks = newSeq[Task]()
   sleepers = initHeapQueue[Task](cmp = cmpSleepUntil)
-  nextTaskId: uint64 = 0
+  nextUserTaskId: int = 1  # grows upwards
+  nextKernelTaskId: int = 0  # grows downwards (negative); idle task gets id 0
 
 
 proc wakeupTasks*()
@@ -143,8 +144,8 @@ proc createUserTask*(
   var regs = cast[ptr TaskRegs](regsAddr)
   zeroMem(regs, sizeof(TaskRegs))
 
-  let taskId = nextTaskId
-  inc nextTaskId
+  let taskId = nextUserTaskId
+  inc nextUserTaskId
 
   result = Task(
     id: taskId,
@@ -217,8 +218,8 @@ proc createKernelTask*(
   regs.rdi = cast[uint64](kproc)  # pass kproc as an argument to kernelTaskWrapper
   regs.rsi = cast[uint64](chid)   # pass chid (second param)
 
-  let taskId = nextTaskId
-  inc nextTaskId
+  let taskId = nextKernelTaskId
+  dec nextKernelTaskId
 
   result = Task(
     id: taskId,

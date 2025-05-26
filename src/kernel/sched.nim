@@ -64,7 +64,7 @@ proc schedule*() =
   # switch to the task with the highest priority
   var nextTask = readyTasks.pop()
 
-  logger.info &"switching -> {nextTask.id}"
+  logger.info &"switching -> {nextTask.id} ({nextTask.name})"
   if nextTask.id == 0:
     logger.info "idle"
 

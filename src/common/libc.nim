@@ -21,3 +21,6 @@ proc exit(status: cint) {.exportc, asmNoStackFrame.} =
     hlt
     jmp .loop
   """
+
+proc memcpy(dest: pointer, source: pointer, size: csize_t) {.exportc.} =
+  copyMem(dest, source, size)

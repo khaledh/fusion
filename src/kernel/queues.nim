@@ -1,10 +1,12 @@
+import std/deques
+
 import condvars
 import locks
 
 type
   BlockingQueue*[T] = ref object of RootObj
     cap*: int
-    items*: seq[T]
+    items*: Deque[T]
     lock*: Lock
     notEmpty*: CondVar
     notFull*: CondVar
@@ -15,7 +17,7 @@ let
 proc newBlockingQueue*[T](capacity: int): BlockingQueue[T] =
   result = BlockingQueue[T](
     cap: capacity,
-    items: @[],
+    items: initDeque[T](),
     lock: newSpinLock(),
     notEmpty: newCondVar(),
     notFull: newCondVar(),
@@ -39,15 +41,13 @@ proc enqueue*[T](q: BlockingQueue[T], item: T) =
       logger.info "queue is full, waiting"
       q.notFull.wait(q.lock)
 
-    # logger.info "enqueuing item"
-    q.items.add(item)
+    q.items.addLast(item)
     q.notEmpty.signal
 
 proc enqueueNoWait*[T](q: BlockingQueue[T], item: T) =
   withLock(q.lock):
     if q.items.len < q.cap:
-      # logger.info "enqueuing item"
-      q.items.add(item)
+      q.items.addLast(item)
       q.notEmpty.signal
 
 proc dequeue*[T](q: BlockingQueue[T]): T =
@@ -56,13 +56,11 @@ proc dequeue*[T](q: BlockingQueue[T]): T =
       logger.info "queue is empty, waiting"
       q.notEmpty.wait(q.lock)
 
-    # logger.info "dequeueing item"
-    result = q.items.pop
+    result = q.items.popFirst()
     q.notFull.signal
 
 proc dequeueNoWait*[T](q: BlockingQueue[T]): T =
   withLock(q.lock):
     if q.items.len > 0:
-      # logger.info "dequeueing item"
-      result = q.items.pop
+      result = q.items.popFirst()
       q.notFull.signal

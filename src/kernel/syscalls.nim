@@ -191,6 +191,35 @@ proc exit*(args: ptr SyscallArgs): int =
   logger.info &"[tid:{getCurrentTask().id}] exit: code={args.arg1}"
   terminate()
 
+###
+# ChannelCreate
+###
+proc channelCreate*(args: ptr SyscallArgs): int =
+  ##
+  ## Create a channel for a task.
+  ##
+  ## Arguments:
+  ##   arg1 (in): mode (0 = read, 1 = write)
+  ##   arg2 (in): message size
+  ## 
+  ## Returns:
+  ##   The channel id
+  ##   -1 on error
+  ##
+  ## Side effects:
+  ##   A channel will be created.
+  ##
+  let currentTask = getCurrentTask()
+  let mode = args.arg1.int
+  if mode < ChannelMode.low.int or mode > ChannelMode.high.int:
+    return InvalidArg.int
+  let chMode = ChannelMode(mode)
+  let msgSize = args.arg2.int
+  logger.info &"[tid:{currentTask.id}] channelCreate: mode={mode}, msgSize={msgSize}"
+  let ret = channels.create(currentTask, chMode, msgSize = msgSize)
+  if ret < 0:
+    return InvalidArg.int
+  args.arg1 = ret.uint64
 
 ###
 # ChannelOpen
@@ -217,8 +246,8 @@ proc channelOpen*(args: ptr SyscallArgs): int =
   let chMode = ChannelMode(mode)
 
   let currentTask = getCurrentTask()
-  logger.info &"[tid:{getCurrentTask().id}] channelOpen: chid={chid}, mode={mode}"
-  let ret = open(chid, getCurrentTask(), chMode)
+  logger.info &"[tid:{currentTask.id}] channelOpen: chid={chid}, mode={mode}"
+  let ret = open(chid, currentTask, chMode)
   if ret < 0:
     return InvalidArg.int
 
@@ -281,8 +310,8 @@ proc channelSend*(args: ptr SyscallArgs): int =
   ## 
   ## Arguments:
   ##   arg1 (in): channel id
-  ##   arg2 (in): data length
-  ##   arg3 (in): data pointer
+  ##   arg2 (in): data pointer
+  ##   arg3 (in): data length
   ##
   ## Returns:
   ##  0 on success
@@ -292,11 +321,11 @@ proc channelSend*(args: ptr SyscallArgs): int =
   ##   If the channel is full, the task will be blocked until there is space in the channel.
   ##
   let chid = args.arg1.int
-  let len = args.arg2.int
-  let data = cast[ptr UncheckedArray[byte]](args.arg3)
+  let data = cast[pointer](args.arg2)
+  let len = args.arg3.int
 
   logger.info &"[tid:{getCurrentTask().id}] channelSend: chid={chid}, len={len}, data={cast[uint64](data):#x}"
-  let ret = send(chid, Message(len: len, data: data))
+  let ret = send(chid, len, data)
   if ret < 0:
     return InvalidArg.int
 
@@ -309,8 +338,8 @@ proc channelRecv*(args: ptr SyscallArgs): int =
   ##
   ## Arguments:
   ##   arg1 (in): channel id
-  ##   arg2 (out): data length
-  ##   arg3 (out): data pointer
+  ##   arg2 (in): buffer pointer
+  ##   arg3 (in): buffer length
   ##
   ## Returns:
   ##   0 on success
@@ -320,12 +349,12 @@ proc channelRecv*(args: ptr SyscallArgs): int =
   ##   If the channel is empty, the task will be blocked until there is data in the channel.
   ##
   let chid = args.arg1.int
+  let buf = cast[pointer](args.arg2)
+  let len = args.arg3.int
   logger.info &"[tid:{getCurrentTask().id}] channelRecv: chid={chid}"
-  let msg = recv(chid)
-  if msg.len < 0:
+  let ret = recv(chid, buf, len)
+  if ret < 0:
     return InvalidArg.int
-  args.arg2 = msg.len.uint64
-  args.arg3 = cast[uint64](msg.data)
 
 ###
 # Print
@@ -369,6 +398,7 @@ proc syscallInit*() =
   syscallTable[SysSleep] = sleep
   syscallTable[SysExit] = exit
 
+  syscallTable[SysChannelCreate] = channelCreate
   syscallTable[SysChannelOpen] = channelOpen
   syscallTable[SysChannelClose] = channelClose
   syscallTable[SysChannelSend] = channelSend

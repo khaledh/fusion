@@ -2,10 +2,11 @@
   Fusion kernel
 ]#
 
-import common/[bootinfo, libc, malloc, serde]
+import common/[bootinfo, libc, malloc]
 import
-  channels, cpu, ctxswitch, devmgr, drivers/pci, idt, lapic,
-  gdt, pmm, sched, syscalls, task, taskmgr, timer, vmmgr, con/console
+  cpu, ctxswitch, devmgr, drivers/pci, idt, lapic, gdt,
+  pmm, sched, syscalls, task, taskmgr, timer, vmmgr,
+  con/console
 
 const KernelVersion = "0.2.0"
 
@@ -78,47 +79,18 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.info "init task manager"
   taskmgrInit()
 
+  logger.info "init idle task"
   var idleTask = createKernelTask(cpu.idle, "idle", TaskPriority.low)
 
-  logger.info "creating console channel"
-  let consoleCh = channels.create(msgSize = sizeof(int))
-  logger.info &"console channel id: {consoleCh.id}"
-
-  proc sendAlloc(size: int): pointer =
-    result = channels.alloc(consoleCh.id, size)
-  
-  let packedObj = serialize("Hello from kernel\n", sendAlloc)
-  let size = sizeof(packedObj.len) + packedObj.len
-  let msg = Message(len: size, data: cast[ptr UncheckedArray[byte]](packedObj))
-  
-  discard channels.send(consoleCh.id, msg)
-
   logger.info "init console"
-  let consoleTask = createKernelTask(console.start, "console", consoleCh.id)
+  let consoleTask = createKernelTask(console.start, "console")
 
   logger.info "init scheduler"
   schedInit([consoleTask])
 
-
   ############### testing #######################################################
   logger.info ""
   logger.info &"{dim()}========== for testing =========={undim()}"
-
-  # test channel
-  logger.info "creating a channel"
-  let testCh = channels.create(msgSize = sizeof(int))
-  logger.info &"test channel id: {testCh.id}"
-  
-  # proc sendAlloc(size: int): pointer =
-  #   result = channels.alloc(testCh.id, size)
-  
-  let packedObj1 = serialize(">> \e[91mping from kernel\e[0m", sendAlloc)
-  let size1 = sizeof(packedObj1.len) + packedObj1.len
-  let msg1 = Message(len: size1, data: cast[ptr UncheckedArray[byte]](packedObj1))
-  
-  discard channels.send(testCh.id, msg1)
-
-  #test user tasks
   logger.info &"creating two user tasks"
 
   var utask1 = createUserTask(

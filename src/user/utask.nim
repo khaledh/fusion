@@ -1,14 +1,13 @@
 #[
   This is an example of a user task.
 ]#
-import std/[strformat, strutils]
+import std/[strformat]
 
 import common/[debugcon, libc, malloc]
-import syslib/[channels, io, os]
+import syslib/[channels, os]
 
 const
   ConsoleChannelId = 0
-  KernelTestChannelId = 1
 
 proc NimMain() {.importc.}
 
@@ -29,37 +28,15 @@ proc UserMainInner(param: int) =
 
   let tid = os.getTaskId()
 
-  if open(cid = ConsoleChannelId, mode = ChannelMode.Write) >= 0:
-    send(cid = ConsoleChannelId, data = &"Hello from task {tid}\n")
-  else:
-    debugln &"Failed to open console channel"
+  let ch = channels.open[string](cid = ConsoleChannelId, mode = ChannelMode.Write)
+  defer: ch.close()
 
-  if open(cid = KernelTestChannelId, mode = ChannelMode.Write) < 0:
+  if ch.id < 0:
+    debugln "Failed to open console channel"
     exit(1)
-  
-  var dataIn: string
 
-  if recv[string](cid = KernelTestChannelId, dataIn) < 0:
-    close(cid = KernelTestChannelId)
-    exit(1)
-  
-  print(dataIn)
+  ch.send(&"Hello from task {tid}\n")
 
-  if dataIn.startsWith(">>"):
-    sleep(100)
-    send(cid = KernelTestChannelId, data = "<< \e[93mpong from task " & $tid & "\e[0m")
-    sleep(100)
-    if recv[string](cid = KernelTestChannelId, dataIn) < 0:
-      close(cid = KernelTestChannelId)
-      exit(1)
-    print(dataIn)
-
-  elif dataIn.startsWith("<<"):
-    print(dataIn)
-    sleep(100)
-    send(cid = KernelTestChannelId, data = ">> \e[93mping from task " & $tid & "\e[0m")
-
-  close(cid = KernelTestChannelId)
 
 ####################################################################################################
 # Report unhandled Nim exceptions
