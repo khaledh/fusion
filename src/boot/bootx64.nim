@@ -6,7 +6,7 @@ import std/sets
 
 import common/[bootinfo, debugcon, malloc, pagetables]
 import libc, uefi
-import kernel/vmm
+import vmm
 
 const
   PhysicalMemoryVirtualBase = 0xffff_8000_0000_0000'u64 # start of upper half
