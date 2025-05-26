@@ -19,23 +19,22 @@ var
   curRow, curCol = 0  # cursor position
   leftPadding, rightPadding = 6
   topPadding, bottomPadding = 6
+  curFont = dina13x7
 
 proc moveCursor*(x, y: int) =
   curCol = x
   curRow = y
 
 proc cur2px*(row, col: int): (int, int) =
-  (leftPadding + col * FontWidth, topPadding + row * FontHeight)
+  (leftPadding + col * curFont.width, topPadding + row * curFont.height)
 
 proc putChar*(row, col: int, c: char, color: uint32 = ForegroundColor) =
   let (x, y) = cur2px(row, col)
-  let glyph = getGlyph(c)
-  for i in 0 ..< FontHeight:
-    for j in 0 ..< FontWidth:
-      # test bit j of glyph[i] starting the most significant bit
-      if (glyph[i] and (1.uint8 shl (FontWidth - j - 1))) != 0:
+  let glyph = getGlyph(curFont, c)
+  for i in 0 ..< curFont.height:
+    for j in 0 ..< curFont.width:
+      if (glyph[i] shr (8 - j - 1) and 1) == 1:
         fb.putPixel(x + j, y + i, color)
-
 
 proc putString*(row, col: int, s: string, color: uint32 = ForegroundColor): (int, int) =
   var (r, c) = (row, col)
@@ -56,8 +55,8 @@ proc start*(chid: int) {.cdecl.} =
   logger.info &"starting console task with chid: {chid}"
   fb.init()
   fb.clear(BackgroundColor)
-  maxCols = (fb.getWidth() - leftPadding - rightPadding) div FontWidth
-  maxRows = (fb.getHeight() - topPadding - bottomPadding) div FontHeight
+  maxCols = (fb.getWidth() - leftPadding - rightPadding) div curFont.width
+  maxRows = (fb.getHeight() - topPadding - bottomPadding) div curFont.height
   logger.info &"console size: {maxCols} x {maxRows}"
 
   while true:
