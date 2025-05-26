@@ -12,6 +12,7 @@ type
     UserCode
     UserData
     UserStack
+    AcpiMemory
     Reserved
 
   MemoryMapEntry* = object
@@ -36,3 +37,6 @@ type
     kernelStackPages*: uint64
     userImagePhysicalBase*: uint64
     userImagePages*: uint64
+    acpiMemoryPhysicalBase*: uint64
+    acpiMemoryPages*: uint64
+    acpiRsdpPhysicalAddr*: uint64

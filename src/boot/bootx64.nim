@@ -2,7 +2,7 @@
   Fusion kernel UEFI bootloader
 ]#
 
-import std/sets
+import std/[sets, tables]
 
 import common/[bootinfo, debugcon, malloc, pagetables]
 import libc, uefi
@@ -71,6 +71,9 @@ proc initBootInfo(
   kernelStackPages: uint64,
   userImagePhysicalBase: uint64,
   userImagePages: uint64,
+  acpiMemoryPhysicalBase: uint64,
+  acpiMemoryPages: uint64,
+  acpiRsdpPhysicalAddr: uint64,
 )
 
 proc createPageTable(
@@ -178,7 +181,7 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
   checkStatus uefi.sysTable.bootServices.allocatePages(
     AllocateAnyPages,
     OsvKernelData,
-    1,
+    BootInfoPages,
     bootInfoPhysicalBase.addr,
   )
   logger.info &"Allocated BootInfo: {BootInfoSize div 1024} KiB at {bootInfoPhysicalBase:#x}"
@@ -254,38 +257,24 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
     echo &"boot: Failed to exit boot services: {status:#x}"
     quit()
 
-  # let numEntries = memoryMapSize div memoryMapDescriptorSize
-  # logger.info &"UEFI Memory Map ({numEntries} entries):"
-  # logger.raw &"""   {"Entry"}"""
-  # logger.raw &"""   {"Type":22}"""
-  # logger.raw &"""   {"Start (hex)":>12}"""
-  # logger.raw &"""   {"Start":>10}"""
-  # logger.raw &"""   {"Size":>10} {dimmed("(#Pages)")}"""
-  # logger.raw "\n"
-  #
-  # var prevEnd = 0'u64
-  # for i in 0 ..< numEntries:
-  #   let entry = cast[ptr EfiMemoryDescriptor](cast[uint64](memoryMap) + i * memoryMapDescriptorSize)
-  #   if entry.physicalStart.uint64 != prevEnd:
-  #     # gap
-  #     let size = entry.physicalStart.uint64 - prevEnd
-  #     logger.raw &"""           {dim()}{"-- gap --":22}"""
-  #     logger.raw &"   {prevEnd:>11x}h"
-  #     logger.raw &"   {bytesToBinSize(prevEnd):>10}"
-  #     logger.raw &"   {bytesToBinSize(size):>10} ({size div 4096})"
-  #     logger.raw &"{undim()}\n"
-  #   logger.raw &"   {i:>5}"
-  #   logger.raw &"   {entry.type:22}"
-  #   logger.raw &"   {entry.physicalStart:>11x}{hex()}"
-  #   logger.raw &"   {bytesToBinSize(entry.physicalStart):>10}"
-  #   logger.raw &"   {bytesToBinSize(entry.numberOfPages * PageSize):>10} {dim()}({entry.numberOfPages}){undim()}"
-  #   logger.raw "\n"
-  #   prevEnd = entry.physicalStart + entry.numberOfPages * PageSize
-
+  # printUefiMemoryMap(memoryMap, memoryMapSize, memoryMapDescriptorSize)
 
   # ======= NO MORE UEFI BOOT SERVICES =======
 
   let virtMemoryMap = createVirtualMemoryMap(kernelImagePages, physMemoryPages)
+
+  # get ACPI memory area
+  var acpiMemoryPhysicalBase: uint64
+  var acpiMemoryPages: uint64
+  for i in 0 ..< physMemoryMap.len:
+    if physMemoryMap[i].type == AcpiMemory:
+      acpiMemoryPhysicalBase = physMemoryMap[i].start
+      acpiMemoryPages = physMemoryMap[i].nframes
+      break
+
+  # get ACPI RSDP physical address
+  let configTables = getUefiConfigTables(uefi.sysTable)
+  let acpiRsdpPhysicalAddr = configTables.getOrDefault(EfiAcpi2TableGuid)
 
   logger.info &"Preparing BootInfo"
   initBootInfo(
@@ -299,6 +288,9 @@ proc EfiMainInner(imgHandle: EfiHandle, sysTable: ptr EFiSystemTable): EfiStatus
     KernelStackPages,
     userImagePhysicalBase,
     userImagePages,
+    acpiMemoryPhysicalBase,
+    acpiMemoryPages,
+    acpiRsdpPhysicalAddr,
   )
 
   let bootloaderPages = (efiLoadedImage.imageSize.uint + 0xFFF) div 0x1000.uint
@@ -428,6 +420,8 @@ proc convertUefiMemoryMap(
         KernelStack
       elif uefiEntry.type == OsvUserCode:
         UserCode
+      elif uefiEntry.type == EfiACPIReclaimMemory:
+        AcpiMemory
       else:
         Reserved
     result.add(MemoryMapEntry(
@@ -477,6 +471,9 @@ proc initBootInfo(
   kernelStackPages: uint64,
   userImagePhysicalBase: uint64,
   userImagePages: uint64,
+  acpiMemoryPhysicalBase: uint64,
+  acpiMemoryPages: uint64,
+  acpiRsdpPhysicalAddr: uint64,
 ) =
   var bootInfo = cast[ptr BootInfo](bootInfoPhysicalBase)
   bootInfo.physicalMemoryVirtualBase = PhysicalMemoryVirtualBase
@@ -507,6 +504,10 @@ proc initBootInfo(
 
   bootInfo.userImagePhysicalBase = userImagePhysicalBase
   bootInfo.userImagePages = userImagePages
+
+  bootInfo.acpiMemoryPhysicalBase = acpiMemoryPhysicalBase
+  bootInfo.acpiMemoryPages = acpiMemoryPages
+  bootInfo.acpiRsdpPhysicalAddr = acpiRsdpPhysicalAddr
 
 ####################################################################################################
 # Page table mapping

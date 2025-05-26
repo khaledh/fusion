@@ -4,9 +4,8 @@
 
 import common/[bootinfo, libc, malloc]
 import
-  cpu, ctxswitch, devmgr, drivers/pci, idt, lapic, gdt,
-  pmm, sched, syscalls, task, taskmgr, timer, vmmgr,
-  con/console
+  acpi, cpu, ctxswitch, devmgr, drivers/pci, idt, lapic, gdt,
+  pmm, sched, syscalls, task, taskmgr, timer, vmmgr, con/console
 
 const KernelVersion = "0.2.0"
 
@@ -49,6 +48,9 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   )
 
   # copy some bootinfo fields before we switch to the new page table
+  let acpiMemoryPhysicalBase = bootInfo.acpiMemoryPhysicalBase
+  let acpiMemoryPages = bootInfo.acpiMemoryPages
+  let acpiRsdpPhysicalAddr = bootInfo.acpiRsdpPhysicalAddr
   let userImagePhysicalBase = bootInfo.userImagePhysicalBase.PAddr
   let userImagePages = bootInfo.userImagePages
 
@@ -67,6 +69,14 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.info "init lapic"
   lapicInit()
 
+  logger.info "init acpi"
+  acpiInit(
+    acpiMemoryPhysicalBase.PAddr,
+    acpiMemoryPages,
+    acpiRsdpPhysicalAddr.PAddr,
+  )
+
+  logger.info "init pci"
   pci.showPciConfig()
   devmgrInit()
 
