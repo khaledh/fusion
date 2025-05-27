@@ -5,7 +5,7 @@
         "fileRegex": "src/boot/.*\\.nim"
     },
     {
-        "projectFile": "src/kernel/main.nim",
+        "projectFile": "src/kernel/start.nim",
         "fileRegex": "src/(kernel|common)/.*\\.nim"
     },
     {

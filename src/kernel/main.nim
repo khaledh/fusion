@@ -2,34 +2,17 @@
   Fusion kernel
 ]#
 
-import common/[bootinfo, libc, malloc]
+import common/bootinfo
 import
   acpi, cpu, ctxswitch, devmgr, drivers/pci, ioapic, idt, lapic, gdt,
   pmm, sched, syscalls, task, taskmgr, timer, vmmgr, con/console
 
-const KernelVersion = "0.2.0"
+const KernelVersion = "0.3.0"
 
-let logger = DebugLogger(name: "main")
+let
+  logger = DebugLogger(name: "main")
 
-proc NimMain() {.importc.}
-proc KernelMainInner(bootInfo: ptr BootInfo)
-proc unhandledException*(e: ref Exception)
-
-####################################################################################################
-# Kernel entry point
-####################################################################################################
-
-proc KernelMain(bootInfo: ptr BootInfo) {.exportc.} =
-  NimMain()
-
-  try:
-    KernelMainInner(bootInfo)
-  except Exception as e:
-    unhandledException(e)
-
-  quit()
-
-proc KernelMainInner(bootInfo: ptr BootInfo) =
+proc kmain*(bootInfo: ptr BootInfo) =
   logger.raw "\n"
   logger.raw &"Fusion Kernel (v{KernelVersion})\n"
   logger.raw "\n"
@@ -129,16 +112,3 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
   logger.info "kernel ready"
   logger.raw "\n"
   switchTo(idleTask)
-
-####################################################################################################
-# Report unhandled Nim exceptions
-####################################################################################################
-
-proc unhandledException*(e: ref Exception) =
-  logger.info ""
-  logger.info &"Unhandled exception: [{e.name}] {e.msg}"
-  if e.trace.len > 0:
-    logger.info ""
-    logger.info "Stack trace:"
-    debug getStackTrace(e)
-  quit()

@@ -16,7 +16,7 @@ export PATH := (
 boot_nim := "src/boot/bootx64.nim"
 boot_out := "bootx64.efi"
 
-kernel_nim := "src/kernel/main.nim"
+kernel_nim := "src/kernel/start.nim"
 kernel_out := "kernel.bin"
 
 user_nim := "src/user/utask.nim"
