@@ -4,7 +4,7 @@
 
 import common/[bootinfo, libc, malloc]
 import
-  acpi, cpu, ctxswitch, devmgr, drivers/pci, idt, lapic, gdt,
+  acpi, cpu, ctxswitch, devmgr, drivers/pci, ioapic, idt, lapic, gdt,
   pmm, sched, syscalls, task, taskmgr, timer, vmmgr, con/console
 
 const KernelVersion = "0.2.0"
@@ -66,15 +66,18 @@ proc KernelMainInner(bootInfo: ptr BootInfo) =
     bootInfo.physicalMemoryPages,
   )
 
-  logger.info "init lapic"
-  lapicInit()
-
   logger.info "init acpi"
   acpiInit(
     acpiMemoryPhysicalBase.PAddr,
     acpiMemoryPages,
     acpiRsdpPhysicalAddr.PAddr,
   )
+
+  logger.info "init lapic"
+  lapicInit()
+
+  logger.info "init ioapic"
+  ioapicInit(acpi.getMadt())
 
   logger.info "init pci"
   pci.showPciConfig()

@@ -62,8 +62,9 @@ var
 proc initBaseAddress() =
   let apicBaseMsr = cast[IA32ApicBaseMsr](readMSR(IA32_APIC_BASE))
   let apicPhysAddr = (apicBaseMsr.baseAddress shl 12).PAddr
+  logger.info &"  lapic is bsp: {apicBaseMsr.isBsp}"
   # by definition, apicPhysAddr is aligned to a page boundary, so we map it directly
-  logger.info &"  local apic physical address: {apicPhysAddr.uint64:#x}"
+  logger.info &"  lapic physical address: {apicPhysAddr.uint64:#x}"
   let mapping = kvMapAt(
     paddr = apicPhysAddr,
     npages = 1,
@@ -71,7 +72,8 @@ proc initBaseAddress() =
     flags = {vmPrivate},
   )
   apicBaseAddress = mapping.region.start.uint64
-  logger.info &"  local apic mapped at virtual address: {apicBaseAddress.uint64:#x}"
+  logger.info &"  lapic mapped at virtual address: {apicBaseAddress.uint64:#x}"
+
 proc readRegister(offset: LapicOffset): uint32 {.inline.} =
   result = cast[ptr uint32](apicBaseAddress + offset.uint16)[]
 
