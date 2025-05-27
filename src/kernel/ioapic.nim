@@ -2,27 +2,21 @@
   I/O APIC
 ]#
 import acpi
+import vmdefs, vmmgr
 
 let
   logger = DebugLogger(name: "ioapic")
 
 type
-  Ioapic* = ref object
+  Ioapic = ref object
     id: uint8
-    address: uint32
+    address: VAddr
     registerSelect: ptr uint32
     registerData: ptr uint32
     gsiBase: uint32
 
 var
-  ioapic*: Ioapic
-
-proc ioapicInit*(madt: ptr Madt)
-proc setRedirEntry*(ioapic: Ioapic, irq: uint8, vector: uint8)
-
-###############################################################################
-# private
-###############################################################################
+  ioapic: Ioapic
 
 type
   IoapicIdRegister {.packed.} = object
@@ -49,31 +43,45 @@ type
     destination     {.bitsize:  8.}: uint64
 
 proc ioapicInit*(madt: ptr Madt) =
+  var ioapicEntry: ptr IoapicEntry
   for entry in madt.ioapics:
     # only one ioapic is supported for now
-    ioapic = Ioapic(
-      id: entry.id,
-      address: entry.address,
-      registerSelect: cast[ptr uint32](entry.address.uint64),
-      registerData: cast[ptr uint32](entry.address.uint64 + 0x10),
-      gsiBase: entry.gsiBase,
-    )
+    ioapicEntry = entry
     break
 
-  if ioapic == nil:
+  if ioapicEntry == nil:
     raise newException(Exception, "No IOAPIC found")
 
-  logger.info &"  ioapic id: {ioapic.id}, address: {ioapic.address:#x}, gsiBase: {ioapic.gsiBase}"
+  # map physical address to virtual address
+  let physPage = roundDownToPage(ioapicEntry.address.PAddr)
+  let offset = offsetInPage(ioapicEntry.address.PAddr)
+  let mapping = kvMapAt(
+    paddr = physPage,
+    npages = 1,
+    perms = {pRead, pWrite},
+    flags = {vmPrivate},
+  )
+  let vaddr = mapping.region.start +! offset
 
-proc readRegister(ioapic: Ioapic, index: int): uint32 =
+  ioapic = Ioapic(
+    id: ioapicEntry.id,
+    address: vaddr,
+    registerSelect: cast[ptr uint32](vaddr),
+    registerData: cast[ptr uint32](vaddr +! 0x10.uint64),
+    gsiBase: ioapicEntry.gsiBase,
+  )
+
+  logger.info &"  ioapic id: {ioapic.id}, gsiBase: {ioapic.gsiBase}, phys: {ioapicEntry.address:#x}, virt: {cast[uint64](vaddr):#x}"
+
+proc readRegister(index: int): uint32 =
   ioapic.registerSelect[] = index.uint32
   result = ioapic.registerData[]
 
-proc writeRegister(ioapic: Ioapic, index: uint32, value: uint32) =
+proc writeRegister(index: uint32, value: uint32) =
   ioapic.registerSelect[] = index
   ioapic.registerData[] = value
 
-proc setRedirEntry(ioapic: Ioapic, irq: uint8, vector: uint8) =
+proc setRedirEntry*(irq: uint8, vector: uint8) =
   # TODO: support other options
   let entry = IoapicRedirectionEntry(
     vector: vector,
@@ -87,5 +95,5 @@ proc setRedirEntry(ioapic: Ioapic, irq: uint8, vector: uint8) =
     destination: 0,     # Lapic ID 0
   )
   let regIndex = 0x10 + (irq * 2)
-  ioapic.writeRegister(regIndex + 0, cast[uint32](cast[uint64](entry) and 0xffff))
-  ioapic.writeRegister(regIndex + 1, cast[uint32](cast[uint64](entry) shr 32))
+  writeRegister(regIndex + 0, cast[uint32](cast[uint64](entry) and 0xffff))
+  writeRegister(regIndex + 1, cast[uint32](cast[uint64](entry) shr 32))

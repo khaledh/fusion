@@ -110,7 +110,7 @@ type
     typ: InterruptControllerType
     len: uint8
 
-  LocalApic {.packed.} = object
+  LapicEntry {.packed.} = object
     hdr: InterruptControllerHeader
     processorUid: uint8
     lapicId: uint8
@@ -120,7 +120,7 @@ type
     laOnlineCapable  = "Online Capable"
   LocalApicFlags = set[LocalApicFlag]
 
-  Ioapic* {.packed.} = object
+  IoapicEntry* {.packed.} = object
     hdr: InterruptControllerHeader
     id*: uint8
     reserved: uint8
@@ -168,16 +168,16 @@ iterator intCtrlStructs(madt: ptr Madt): ptr InterruptControllerHeader {.inline.
     )
 
 # Local APICs
-iterator lapics*(madt: ptr Madt): ptr LocalApic =
+iterator lapics*(madt: ptr Madt): ptr LapicEntry =
   for intCtrlStruct in intCtrlStructs(madt):
     if intCtrlStruct.typ == ictLocalApic:
-      yield cast[ptr LocalApic](intCtrlStruct)
+      yield cast[ptr LapicEntry](intCtrlStruct)
 
 # I/O APICs
-iterator ioapics*(madt: ptr Madt): ptr Ioapic =
+iterator ioapics*(madt: ptr Madt): ptr IoapicEntry =
   for intCtrlStruct in intCtrlStructs(madt):
     if intCtrlStruct.typ == ictIoapic:
-      yield cast[ptr Ioapic](intCtrlStruct)
+      yield cast[ptr IoapicEntry](intCtrlStruct)
 
 # Interrupt Source Overrides
 iterator interruptSourceOverrides*(madt: ptr Madt): ptr InterruptSourceOverride =

@@ -72,18 +72,26 @@ template `-`*(p1, p2: PAddr): uint64 = p1.uint64 - p2.uint64
 proc roundDownToPage*(vaddr: uint64): uint64 {.inline.} =
   vaddr and not (PageSize.uint64 - 1)
 
-proc roundUpToPage*(vaddr: uint64): uint64 {.inline.} =
-  (vaddr + PageSize.uint64 - 1) and not (PageSize.uint64 - 1)
-
 proc roundDownToPage*(vaddr: VAddr): VAddr {.inline.} =
   roundDownToPage(vaddr.uint64).VAddr
+
+proc roundDownToPage*(paddr: PAddr): PAddr {.inline.} =
+  roundDownToPage(paddr.uint64).PAddr
+
+proc roundUpToPage*(vaddr: uint64): uint64 {.inline.} =
+  (vaddr + PageSize.uint64 - 1) and not (PageSize.uint64 - 1)
 
 proc roundUpToPage*(vaddr: VAddr): VAddr {.inline.} =
   roundUpToPage(vaddr.uint64).VAddr
 
+proc roundUpToPage*(paddr: PAddr): PAddr {.inline.} =
+  roundUpToPage(paddr.uint64).PAddr
+
 proc offsetInPage*(vaddr: VAddr): uint64 {.inline.} =
   vaddr.uint64 and (PageSize.uint64 - 1)
 
+proc offsetInPage*(paddr: PAddr): uint64 {.inline.} =
+  paddr.uint64 and (PageSize.uint64 - 1)
 
 # pointer operations
 

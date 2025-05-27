@@ -59,21 +59,6 @@ let
 var
   apicBaseAddress: uint64
 
-proc initBaseAddress() =
-  let apicBaseMsr = cast[IA32ApicBaseMsr](readMSR(IA32_APIC_BASE))
-  let apicPhysAddr = (apicBaseMsr.baseAddress shl 12).PAddr
-  logger.info &"  lapic is bsp: {apicBaseMsr.isBsp}"
-  # by definition, apicPhysAddr is aligned to a page boundary, so we map it directly
-  logger.info &"  lapic physical address: {apicPhysAddr.uint64:#x}"
-  let mapping = kvMapAt(
-    paddr = apicPhysAddr,
-    npages = 1,
-    perms = {pRead, pWrite},
-    flags = {vmPrivate},
-  )
-  apicBaseAddress = mapping.region.start.uint64
-  logger.info &"  lapic mapped at virtual address: {apicBaseAddress.uint64:#x}"
-
 proc readRegister(offset: LapicOffset): uint32 {.inline.} =
   result = cast[ptr uint32](apicBaseAddress + offset.uint16)[]
 
@@ -90,12 +75,27 @@ proc spuriousInterruptHandler*(frame: ptr InterruptFrame)
   return
 
 proc lapicInit*() =
-  initBaseAddress()
+  # init base address
+  let apicBaseMsr = cast[IA32ApicBaseMsr](readMSR(IA32_APIC_BASE))
+  let apicPhysAddr = (apicBaseMsr.baseAddress shl 12).PAddr
+  # by definition, apicPhysAddr is aligned to a page boundary, so we map it directly
+  let mapping = kvMapAt(
+    paddr = apicPhysAddr,
+    npages = 1,
+    perms = {pRead, pWrite},
+    flags = {vmPrivate},
+  )
+  apicBaseAddress = mapping.region.start.uint64
+
+  let lapicId = readRegister(LapicOffset.LapicId)
+  logger.info &"  lapic id: {lapicId}, is bsp: {apicBaseMsr.isBsp}, phys: {apicPhysAddr.uint64:#x}, virt: {apicBaseAddress.uint64:#x}"
+
   # enable APIC and install spurious interrupt handler
   let sivr = SpuriousInterruptVectorRegister(vector: 0xff, apicEnabled: 1)
   writeRegister(LapicOffset.SpuriousInterrupt, cast[uint32](sivr))
   # install spurious interrupt handler
   installHandler(0xff, spuriousInterruptHandler)
+  logger.info &"    spurious interrupt vector: {sivr.vector:#x}"
 
 #############
 # APIC Timer
