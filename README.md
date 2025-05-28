@@ -24,11 +24,10 @@ The following features are currently implemented:
 
 - UEFI Bootloader
 - Memory Management
-  - Single Address Space
+  - Single Address Space (Higher Half Kernel)
   - Physical Memory Manager
   - Virtual Memory Manager
   - Demand Paging
-  - Higher Half Kernel
 - Task Management
   - Kernel Tasks
   - User Mode Tasks
@@ -39,12 +38,14 @@ The following features are currently implemented:
   - System Call Interface
   - User Mode Library
 - IPC
-  - Synchronization Primitives
   - Channel-based IPC
   - Message Passing
 - Hardware
-  - Timer Interrupts
   - PCI Device Enumeration
+  - ACPI Configuration
+  - Local APIC Timer
+  - I/O APIC Interrupts
+  - PS/2 Keyboard Driver
   - Bochs Graphics Adapter Driver
 
 #### Planned
@@ -53,7 +54,6 @@ The following features are currently implemented:
 - Event-based Task State Machines
 - Disk I/O
 - File System
-- Keyboard/Mouse Input
 - Shell
 - GUI
 - Networking
