@@ -4,6 +4,7 @@
 import std/strformat
 
 import ports
+import kernel/channels
 import kernel/idt
 import kernel/ioapic
 import kernel/lapic
@@ -49,11 +50,10 @@ type
     shift*: bool
     ctrl*: bool
     alt*: bool
-  KeyEventHandler* = proc (evt: KeyEvent)
 
 var
   shift, ctrl, alt = false
-  handleKeyEvent: KeyEventHandler
+  kbdChId: int
 
 proc `$`*(evt: KeyEvent): string =
   result.add($evt.eventType)
@@ -109,9 +109,7 @@ proc kbdInterruptHandler*(intFrame: ptr InterruptFrame)
           shift: shift, ctrl: ctrl, alt: alt
         )
         # logger.info "keyEvent = ", $keyEvent
-        if not isNil(handleKeyEvent):
-          handleKeyEvent(keyEvent)
-
+        discard channels.send(kbdChId, keyEvent)
   else:
     # key release
     scanCode = scanCode and (not 0x80'u8)
@@ -130,14 +128,20 @@ proc kbdInterruptHandler*(intFrame: ptr InterruptFrame)
           shift: shift, ctrl: ctrl, alt: alt
         )
         # logger.info "keyEvent = ", $keyEvent
-        if not isNil(handleKeyEvent):
-          handleKeyEvent(keyEvent)
+        # discard channels.send(kbdChId, keyEvent)
 
   lapic.eoi()
 
-proc kbdInit*(handler: KeyEventHandler) =
-  handleKeyEvent = handler
-  logger.info &"Setting keyboard interrupt handler ({KbdInterruptVector:0>2x}h)"
+proc kbdInit*(): int =
+  ## Initialize the keyboard driver and return the channel id for key events.
+
+  # create a channel to send key events
+  kbdChId = channels.createKernelChannel[KeyEvent](mode = ChannelMode.Write)
+  logger.info &"created keyboard channel id = {kbdChId} for key events"
+
+  # install the keyboard interrupt handler: interrupt input 1 => vector 21h
   idt.installHandler(KbdInterruptVector, kbdInterruptHandler)
-  # set keyboard interrupt: interrupt input 1 => vector 21h
   ioapic.setRedirEntry(irq = 1, vector = KbdInterruptVector)
+  logger.info &"installed keyboard interrupt handler ({KbdInterruptVector:0>2x}h)"
+
+  result = kbdChId

@@ -44,11 +44,14 @@ proc enqueue*[T](q: BlockingQueue[T], item: T) =
     q.items.addLast(item)
     q.notEmpty.signal
 
-proc enqueueNoWait*[T](q: BlockingQueue[T], item: T) =
+proc enqueueNoWait*[T](q: BlockingQueue[T], item: T): bool =
   withLock(q.lock):
     if q.items.len < q.cap:
       q.items.addLast(item)
       q.notEmpty.signal
+      result = true
+    else:
+      result = false
 
 proc dequeue*[T](q: BlockingQueue[T]): T =
   withLock(q.lock):
@@ -59,8 +62,8 @@ proc dequeue*[T](q: BlockingQueue[T]): T =
     result = q.items.popFirst()
     q.notFull.signal
 
-proc dequeueNoWait*[T](q: BlockingQueue[T]): T =
+proc dequeueNoWait*[T](q: BlockingQueue[T]): Option[T] =
   withLock(q.lock):
     if q.items.len > 0:
-      result = q.items.popFirst()
+      result = some(q.items.popFirst())
       q.notFull.signal

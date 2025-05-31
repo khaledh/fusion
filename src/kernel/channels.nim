@@ -1,5 +1,6 @@
 import std/tables
 
+import common/serde
 import locks
 import queues
 import task
@@ -67,7 +68,7 @@ type
     Write
 
 const
-  DefaultMessageCapacity* = 1024
+  DefaultCap* = 1024
 
 let
   logger = DebugLogger(name: "channels")
@@ -81,6 +82,34 @@ proc newChannelId(): int =
   withLock(nextChannelIdLock):
     result = nextChannelId
     inc nextChannelId
+
+# Forward declarations
+proc createKernelChannel*(mode: ChannelMode, msgSize: int, msgCapacity: int = DefaultCap): int
+proc createKernelChannel*[T](mode: ChannelMode, msgCapacity: int = DefaultCap): int
+proc createUserChannel*(task: Task, mode: ChannelMode, msgSize: int, msgCapacity: int = DefaultCap): int
+proc createUserChannel*[T](task: Task, mode: ChannelMode, msgCapacity: int = DefaultCap): int
+
+proc openUserChannel*(chid: int, task: Task, mode: ChannelMode): int
+proc openKernelChannel*(task: Task, chid: int, mode: ChannelMode): int
+
+proc alloc*(chid: int, len: int): pointer
+
+proc send*(chid: int, len: int, data: pointer): int
+proc send*[T](chid: int, data: T): int
+
+proc recv*(chid: int, buf: pointer, len: int): int
+proc recv*[T](chid: int): Option[T]
+proc tryRecv*(chid: int, buf: pointer, len: int): int
+proc tryRecv*[T](chid: int): Option[T]
+
+proc close*(chid: int, task: Task): int
+
+
+####################################################################################################
+# Create Channel
+####################################################################################################
+
+## Helper templates/functions
 
 template msgSizeToChannelSize(msgSize: int): int =
   if msgSize <= 8: 8
@@ -119,60 +148,16 @@ template newChannelBySize(chMsgSize: int, msgCapacity, buffSize, mapping: untype
     of 1024: constructChannel(1024, msgCapacity, buffSize, mapping)
     else: raise newException(ValueError, "Message size too large (max 1024)")
 
-template sendMessageAux(ch: ChannelBase, msgSize: static int, len: int, data: pointer) =
-  let chan = cast[Channel[msgSize]](ch)
-  var msg = Message[msgSize]()
-  msg.len = len
-  copyMem(msg.data.addr, data, len)
-  chan.queue.enqueue(msg)
-
-template sendMessage(ch: ChannelBase, len: int, data: pointer) =
-  case ch.msgSize:
-    of 8: sendMessageAux(ch, 8, len, data)
-    of 16: sendMessageAux(ch, 16, len, data)
-    of 32: sendMessageAux(ch, 32, len, data)
-    of 64: sendMessageAux(ch, 64, len, data)
-    of 128: sendMessageAux(ch, 128, len, data)
-    of 256: sendMessageAux(ch, 256, len, data)
-    of 512: sendMessageAux(ch, 512, len, data)
-    of 1024: sendMessageAux(ch, 1024, len, data)
-    else: raise newException(ValueError, "Message size too large (max 1024)")
-
-template recvMessageAux(ch: ChannelBase, msgSize: static int, buf: pointer, len: int) =
-  let chan = cast[Channel[msgSize]](ch)
-  let msg = chan.queue.dequeue()
-  if len < msg.len:
-    logger.info &"recv: buffer too small (buffer len: {len}, msg len: " & $msg.len & ") @ chid={ch.id}"
-    result = -1
-  else:
-    copyMem(buf, msg.data.addr, len)
-
-proc recvMessage(ch: ChannelBase, buf: pointer, len: int): int =
-  case ch.msgSize:
-    of 8: recvMessageAux(ch, 8, buf, len)
-    of 16: recvMessageAux(ch, 16, buf, len)
-    of 32: recvMessageAux(ch, 32, buf, len)
-    of 64: recvMessageAux(ch, 64, buf, len)
-    of 128: recvMessageAux(ch, 128, buf, len)
-    of 256: recvMessageAux(ch, 256, buf, len)
-    of 512: recvMessageAux(ch, 512, buf, len)
-    of 1024: recvMessageAux(ch, 1024, buf, len)
-    else: raise newException(ValueError, "Message size too large (max 1024)")
-
-proc create*(
-  task: Task, mode: ChannelMode, msgSize: int, msgCapacity: int = DefaultMessageCapacity
+proc createChannel(
+  msgSize: int,
+  msgCapacity: int = DefaultCap,
+  vmMapper: proc (npages: uint64): VmMapping,
 ): int =
   let chMsgSize = msgSizeToChannelSize(msgSize)
   let chBuffSize = chMsgSize * msgCapacity
   let numPages = (chBuffSize + PageSize - 1) div PageSize
-  # Map the buffer in user space.
-  let mapping = uvMap(
-    pml4 = task.pml4,
-    npages = numPages.uint64,
-    perms = if mode == ChannelMode.Read: {pRead} else: {pRead, pWrite},
-    flags = {vmShared},
-  )
-  task.vmMappings.add(mapping)
+
+  let mapping = vmMapper(numPages.uint64)
 
   let buffStart = cast[VAddr](mapping.region.start)
   logger.info &"create: mapped channel buffer to {buffStart.uint64:#x}"
@@ -182,27 +167,97 @@ proc create*(
   result = ch.id
   logger.info &"create: created channel id {ch.id} @ {cast[uint64](ch.buffer.data):#x}"
 
-proc create*[T](task: Task, mode: ChannelMode, msgCapacity: int = DefaultMessageCapacity): int =
-  create(task, mode, sizeof(T), msgCapacity)
+## Kernel channel
 
-proc open*(chid: int, task: Task, mode: ChannelMode): int =
+proc createKernelChannel*(
+  mode: ChannelMode, msgSize: int, msgCapacity: int = DefaultCap
+): int =
+  createChannel(msgSize, msgCapacity, proc (npages: uint64): VmMapping =
+    kvMap(
+      npages = npages,
+      perms = if mode == ChannelMode.Read: {pRead} else: {pRead, pWrite},
+      flags = {vmShared},
+    )
+  )
+
+proc createKernelChannel*[T](mode: ChannelMode, msgCapacity: int = DefaultCap): int =
+  createKernelChannel(mode, sizeof(T), msgCapacity)
+
+## User channel
+
+proc createUserChannel*(
+  task: Task, mode: ChannelMode, msgSize: int, msgCapacity: int = DefaultCap
+): int =
+  createChannel(msgSize, msgCapacity, proc (npages: uint64): VmMapping =
+    let mapping = uvMap(
+      pml4 = task.pml4,
+      npages = npages,
+      perms = if mode == ChannelMode.Read: {pRead} else: {pRead, pWrite},
+      flags = {vmShared},
+    )
+    task.vmMappings.add(mapping)
+    mapping
+  )
+
+proc createUserChannel*[T](task: Task, mode: ChannelMode, msgCapacity: int = DefaultCap): int =
+  createUserChannel(task, mode, sizeof(T), msgCapacity)
+
+####################################################################################################
+# Open Channel
+####################################################################################################
+
+proc openChannel*(
+  chid: int,
+  mode: ChannelMode,
+  vmMapper: proc (ch: ChannelBase): VmMapping,
+): int =
   ## Open a channel for a task in a specific mode. Map the buffer to the task's address space.
   if not channels.hasKey(chid):
     logger.info &"open: channel id {chid} not found"
     return -1
 
   var ch = channels[chid]
-  let perms = if mode == ChannelMode.Read: {pRead} else: {pRead, pWrite}
+  let mapping = vmMapper(ch)
 
-  let mapping = uvMapShared(
-    pml4 = task.pml4,
-    mapping = ch.buffer.vmMapping,
-    perms = perms,
-    flags = {vmShared},
-  )
-  task.vmMappings.add(mapping)
+proc openUserChannel*(chid: int, task: Task, mode: ChannelMode): int =
+  ## Open a user channel for a task in a specific mode. Map the buffer to the task's address space.
+  ##
+  ## Arguments:
+  ##   - `chid`: the channel id
+  ##   - `task`: the task to open the channel for
+  ##   - `mode`: the mode to open the channel in
+  ##
+  ## Returns:
+  ##   - 0 on success, -1 on failure
+  result = openChannel(chid, mode) do (ch: ChannelBase) -> VmMapping:
+    let mapping = uvMapShared(
+      pml4 = task.pml4,
+      mapping = ch.buffer.vmMapping,
+      perms = if mode == ChannelMode.Read: {pRead} else: {pRead, pWrite},
+      flags = {vmShared},
+    )
+    task.vmMappings.add(mapping)
+    mapping
 
-  logger.info &"open: opened channel id {chid} for task {task.id} in mode {mode}"
+  logger.info &"open: opened channel id {result} for task {task.id} in mode {mode}"
+
+proc openKernelChannel*(task: Task, chid: int, mode: ChannelMode): int =
+  ## Open a kernel channel in a specific mode. Map the buffer to the kernel's address space.
+  ##
+  ## Arguments:
+  ##   - `chid`: the channel id
+  ##   - `mode`: the mode to open the channel in
+  ##
+  ## Returns:
+  ##   - 0 on success, -1 on failure
+  result = openChannel(chid, mode) do (ch: ChannelBase) -> VmMapping:
+    let mapping = kvMapShared(
+      mapping = ch.buffer.vmMapping,
+      perms = if mode == ChannelMode.Read: {pRead} else: {pRead, pWrite},
+      flags = {vmShared},
+    )
+    task.vmMappings.add(mapping)
+    mapping
 
 proc alloc*(chid: int, len: int): pointer {.stackTrace:off.} =
   if not channels.hasKey(chid):
@@ -221,35 +276,9 @@ proc alloc*(chid: int, len: int): pointer {.stackTrace:off.} =
 
     logger.info &"alloc: allocated message (len: {len}, addr: {cast[uint64](result):#x}) @ chid={chid}"
 
-proc send*(chid: int, len: int, data: pointer): int {.stackTrace:off.} =
-  if not channels.hasKey(chid):
-    logger.info &"send: channel id {chid} not found"
-    return -1
-
-  # logger.info &"send: sending message (len: {len}) @ chid={chid}"
-
-  let ch = channels[chid]
-  withLock(ch.writeLock):
-    sendMessage(ch, len, data)
-    # logger.info &"send: enqueued message (len: {len} @ chid={chid}"
-
-proc send*[T](chid: int, data: T): int {.stackTrace:off.} =
-  send(chid, sizeof(T), data.addr)
-
-proc recv*(chid: int, buf: pointer, len: int): int {.stackTrace:off.} =
-  if not channels.hasKey(chid):
-    logger.info &"recv: channel id {chid} not found"
-    return -1
-
-  let ch = channels[chid]
-
-  result = recvMessage(ch, buf, len)
-  # logger.info &"recv: dequeued message (len: {len}) @ chid={chid}"
-
-proc recv*[T](chid: int): Option[T] {.stackTrace:off.} =
-  var data: T
-  let ret = recv(chid, data.addr, sizeof(T))
-  result = if ret < 0: none(T) else: some(data)
+####################################################################################################
+# Close Channel
+####################################################################################################
 
 proc close*(chid: int, task: Task): int =
   ## Close a channel for a task. Unmap the buffer from the task's address space.
@@ -266,3 +295,113 @@ proc close*(chid: int, task: Task): int =
   #   npages = numPages.uint64
   # )
   logger.info &"close: closed channel id {chid} for task {task.id}"
+
+####################################################################################################
+# Send Message
+####################################################################################################
+
+template sendMessageAux[S: static int](ch: ChannelBase, len: int, data: pointer) =
+  let chan = cast[Channel[S]](ch)
+  var msg = Message[S]()
+  msg.len = len
+  copyMem(msg.data[0].addr, data, len)
+  chan.queue.enqueue(msg)
+
+template sendMessage(ch: ChannelBase, len: int, data: pointer) =
+  case ch.msgSize:
+    of 8: sendMessageAux[8](ch, len, data)
+    of 16: sendMessageAux[16](ch, len, data)
+    of 32: sendMessageAux[32](ch, len, data)
+    of 64: sendMessageAux[64](ch, len, data)
+    of 128: sendMessageAux[128](ch, len, data)
+    of 256: sendMessageAux[256](ch, len, data)
+    of 512: sendMessageAux[512](ch, len, data)
+    of 1024: sendMessageAux[1024](ch, len, data)
+    else: raise newException(ValueError, "Message size too large (max 1024)")
+
+proc send*(chid: int, len: int, data: pointer): int {.stackTrace:off.} =
+  if not channels.hasKey(chid):
+    logger.info &"send: channel id {chid} not found"
+    return -1
+
+  logger.info &"send: chid={chid}, len={len}, data @ {cast[uint64](data):#x}"
+
+  let ch = channels[chid]
+  withLock(ch.writeLock):
+    sendMessage(ch, len, data)
+    # logger.info &"send: enqueued message (len: {len} @ chid={chid}"
+
+proc send*[T](chid: int, data: T): int {.stackTrace:off.} =
+  # check if T is a string
+  when T is string:
+    let fs = buildString(data, proc (size: int): pointer = alloc(chid, size))
+    let dataPtr = fs.addr
+    let dataLen = sizeof(FString)
+  else:
+    let dataPtr = data.addr
+    let dataLen = sizeof(T)
+
+  send(chid, dataLen, dataPtr)
+
+####################################################################################################
+# Receive Message
+####################################################################################################
+
+proc recvMessageAux[S: static int](
+  ch: ChannelBase,
+  buf: pointer,
+  len: int,
+  noWait: bool = false,
+): int =
+  let chan = cast[Channel[S]](ch)
+  var msg: Message[S]
+  if noWait:
+    msg = chan.queue.dequeueNoWait().orElse:
+      return -1
+  else:
+    msg = chan.queue.dequeue()
+
+  if len < msg.len:
+    logger.info &"recv: buffer too small (len: {len}, msg.len: {msg.len})"
+    return -1
+
+  copyMem(buf, msg.data[0].addr, len)
+
+proc recvMessage(ch: ChannelBase, buf: pointer, len: int, noWait: bool = false): int =
+  case ch.msgSize:
+    of 8: recvMessageAux[8](ch, buf, len, noWait)
+    of 16: recvMessageAux[16](ch, buf, len, noWait)
+    of 32: recvMessageAux[32](ch, buf, len, noWait)
+    of 64: recvMessageAux[64](ch, buf, len, noWait)
+    of 128: recvMessageAux[128](ch, buf, len, noWait)
+    of 256: recvMessageAux[256](ch, buf, len, noWait)
+    of 512: recvMessageAux[512](ch, buf, len, noWait)
+    of 1024: recvMessageAux[1024](ch, buf, len, noWait)
+    else: raise newException(ValueError, "Message size too large (max 1024)")
+
+proc recv*(chid: int, buf: pointer, len: int): int {.stackTrace:off.} =
+  if not channels.hasKey(chid):
+    logger.info &"recv: channel id {chid} not found"
+    return -1
+
+  let ch = channels[chid]
+  result = recvMessage(ch, buf, len, noWait = false)
+  # logger.info &"recv: dequeued message (len: {len}) @ chid={chid}"
+
+proc recv*[T](chid: int): Option[T] {.stackTrace:off.} =
+  var t: T
+  let ret = recv(chid, t.addr, sizeof(T))
+  result = if ret < 0: none(T) else: some(t)
+
+proc tryRecv*(chid: int, buf: pointer, len: int): int {.stackTrace:off.} =
+  if not channels.hasKey(chid):
+    logger.info &"tryRecv: channel id {chid} not found"
+    return -1
+
+  let ch = channels[chid]
+  result = recvMessage(ch, buf, len, noWait = true)
+
+proc tryRecv*[T](chid: int): Option[T] {.stackTrace:off.} =
+  var t: T
+  let ret = tryRecv(chid, t.addr, sizeof(T))
+  result = if ret < 0: none(T) else: some(t)

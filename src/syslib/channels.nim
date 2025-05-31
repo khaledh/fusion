@@ -1,7 +1,7 @@
 #[
   Channel library functions
 ]#
-import std/[options, strformat]
+import std/[options, sequtils, strformat]
 
 import common/[debugcon, serde]
 include syscalldef
@@ -16,8 +16,15 @@ type
 
   Channel*[T] = object
     id*: int
+    msgSize*: int
     mode*: ChannelMode
     alloc*: Allocator
+
+template `+!`(p: pointer, i: int): pointer =
+  cast[pointer](cast[uint64](p) + i.uint64)
+
+template `+!`[T](p: ptr T, i: int): ptr T =
+  cast[ptr T](cast[uint64](p) + i.uint64)
 
 ################################# System Calls #################################
 
@@ -86,20 +93,40 @@ proc channelAlloc*(cid: int, len: int): pointer =
 
   return pdata
 
-proc channelSend*(cid: int, len: int, data: pointer): int {.discardable.} =
-  let dataLen {.codegenDecl: """register $# $# asm("r8")""".} = len
+proc channelSend*(cid: int, msg: Message, isBatch: bool = false): int {.discardable.} =
+  let syscall = if isBatch: SysChannelSendBatch else: SysChannelSend
+  let dataPtr = msg.data
+  let dataLen {.codegenDecl: """register $# $# asm("r8")""".} = msg.len
 
   asm """
     syscall
     : "=a" (`result`)          // rax (return value)
-    : "D" (`SysChannelSend`),  // rdi (syscall number)
+    : "D" (`syscall`),         // rdi (syscall number)
       "S" (`cid`),             // rsi (channel id)
-      "d" (`data`),            // rdx (pointer to buffer)
+      "d" (`dataPtr`),         // rdx (pointer to buffer)
       "r" (`dataLen`)          // r8  (length of buffer)
     : "rcx", "r11", "memory"
   """
 
-proc channelRecv*[T](cid: int): Option[T] =
+proc channelSendBatch*(cid: int, msgs: openArray[Message]): int {.discardable.} =
+  # allocate enough space to hold the batch message itself
+  let batchLen = sizeof(int) + msgs.len * sizeof(Message)  # int for count, then messages
+  let batchPtr = channelAlloc(cid, batchLen)
+  if batchPtr == nil:
+    return -1
+
+  # copy the messages metadata to the allocated space
+  let batch = cast[ptr MessageBatch](batchPtr)
+  batch.count = msgs.len
+  for i in 0 ..< msgs.len:
+    batch.messages[i].len = msgs[i].len
+    batch.messages[i].data = msgs[i].data
+
+  # send the batch message itself
+  let msg = Message(len: batchLen, data: batchPtr)
+  channelSend(cid, msg, isBatch = true)
+
+proc channelRecv*(cid: int, buf: pointer, len: int): int =
   ## Receive data from a channel
   ## 
   ## Arguments:
@@ -108,30 +135,24 @@ proc channelRecv*[T](cid: int): Option[T] =
   ##   len (in): buffer length
   ##
   ## Returns:
-  ##   Some(data) on success
-  ##   None on error
+  ##   0 on success
+  ##   -1 on error
  
-  var
-    ret: int
-    msg: T
-    msgPtr = msg.addr
-    msgLen {.codegenDecl: """register $# $# asm("r8")""".} = sizeof(T)
+  let bufLen {.codegenDecl: """register $# $# asm("r8")""".} = len
 
   asm """
     syscall
-    : "=a" (`ret`),            // rax (return value)
-    : "D" (`SysChannelRecv`),  // rdi (syscall number)
-      "S" (`cid`),             // rsi (channel id)
-      "d" (`msgPtr`),          // rdx (pointer to buffer)
-      "r" (`msgLen`)           // r8  (length of buffer)
+    : "=a" (`result`)          // rax (return value)
+    : "D" (`SysChannelRecv`),   // rdi (syscall number)
+      "S" (`cid`),              // rsi (channel id)
+      "d" (`buf`),              // rdx (pointer to buffer to store data)
+      "r" (`bufLen`)            // r8  (length of buffer)
     : "rcx", "r11", "memory"
   """
 
-  if ret < 0:
+  if result < 0:
     logger.info &"recv: error receiving data from channel {cid}: {result}"
-    result = none(T)
-  else:
-    result = some(msg)
+    return -1
 
 proc channelClose*(cid: int): int {.discardable.} =
   ## Close a channel
@@ -153,12 +174,13 @@ proc channelClose*(cid: int): int {.discardable.} =
 
 ################################# Channel API ##################################
 
-proc create*[T](mode: ChannelMode, msgSize: int): Channel[T] =
-  let cid = channelCreate(mode, msgSize)
+proc create*[T](mode: ChannelMode): Channel[T] =
+  let cid = channelCreate(mode, sizeof(T))
   if cid < 0:
-    raise newException(Exception, &"Failed to create channel in mode {mode} with msgSize {msgSize}")
+    raise newException(Exception, &"Failed to create channel in mode {mode}")
 
   result.id = cid
+  result.msgSize = sizeof(T)
   result.mode = mode
   result.alloc = proc (size: int): pointer = channelAlloc(cid, size)
 
@@ -167,6 +189,7 @@ proc open*[T](cid: int, mode: ChannelMode): Channel[T] =
     raise newException(Exception, &"Failed to open channel {cid} in mode {mode}")
 
   result.id = cid
+  result.msgSize = sizeof(T)
   result.mode = mode
   result.alloc = proc (size: int): pointer = channelAlloc(cid, size)
 
@@ -184,16 +207,63 @@ proc send*[T](ch: Channel[T], data: T): int {.discardable.} =
   if ch.mode != ChannelMode.Write:
     return -1
 
-  # check if T is a string
   when T is string:
     let fs = buildString(data, ch.alloc)
-    let dataPtr = fs.addr
-    let dataLen = sizeof(FString)
+    let msg = Message(len: sizeof(FString), data: fs.addr)
   else:
-    let dataPtr = data.addr
-    let dataLen = sizeof(T)
+    let msg = Message(len: sizeof(T), data: data.addr)
 
-  result = channelSend(ch.id, dataLen, dataPtr)
+  result = channelSend(ch.id, msg)
+
+proc sendBatch*[T](ch: Channel[T], items: openArray[T]): int {.discardable.} =
+  ## Send a batch of messages to a channel
+  ## 
+  ## Arguments:
+  ##   chid (in): channel id
+  ##   msgs (in): messages to send
+  ##
+  ## Returns:
+  ##   0 on success
+  ##  -1 on error
+
+  if ch.mode != ChannelMode.Write:
+    return -1
+    
+  var msgs: seq[Message]
+  var fstrings: seq[FString]
+  when T is string:
+    for item in items:
+      let fs = buildString(item, ch.alloc)
+      fstrings.add(fs)
+    msgs = fstrings.mapIt(Message(len: sizeof(FString), data: it.addr))
+  else:
+    for item in items:
+      msgs.add(Message(len: sizeof(T), data: item.addr)) 
+
+  result = channelSendBatch(ch.id, msgs)
+
+proc recv*[T](ch: Channel[T]): Option[T] =
+  ## Receive data from a channel
+  ## 
+  ## Arguments:
+  ##   chid (in): channel id
+  ##
+  ## Returns:
+  ##   data on success
+
+  if ch.mode != ChannelMode.Read:
+    logger.info &"recv: channel {ch.id} is not in read mode"
+    return none(T)
+
+  var t: T
+  if channelRecv(ch.id, t.addr, sizeof(T)) < 0:
+    return none(T)
+
+  when T is string:
+    let fs = cast[FString](t)
+    return some($fs.str)
+  else:
+    return some(t)
 
 proc close*[T](ch: Channel[T]) =
   ## Close a channel

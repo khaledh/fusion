@@ -75,39 +75,21 @@ proc kmain*(bootInfo: ptr BootInfo) =
   logger.info "init task manager"
   taskmgrInit()
 
-  logger.info "init idle task"
+  logger.info "creating idle task"
   var idleTask = createKernelTask(cpu.idle, "idle", TaskPriority.low)
 
-  logger.info "init console"
+  logger.info "creating console task"
   let consoleTask = createKernelTask(console.start, "console")
 
-  logger.info "init scheduler"
-  schedInit([consoleTask])
-
-  ############### testing #######################################################
-  logger.info ""
-  logger.info &"{dim()}========== for testing =========={undim()}"
-  logger.info &"creating two user tasks"
-
-  var utask1 = createUserTask(
+  logger.info &"creating shell task"
+  var shellTask = createUserTask(
     imagePhysAddr = userImagePhysicalBase,
     imagePageCount = userImagePages,
-    name = "utask1",
-  )
-  logger.info ""
-
-  var utask2 = createUserTask(
-    imagePhysAddr = userImagePhysicalBase,
-    imagePageCount = userImagePages,
-    name = "utask2",
+    name = "shell",
   )
 
-  sched.addTask(utask1)
-  sched.addTask(utask2)
-
-  logger.info &"{dim()}================================={undim()}"
-  logger.info ""
-  ############### /testing ######################################################
+  logger.info "initializing scheduler"
+  schedInit([consoleTask, shellTask])
 
   logger.info "kernel ready"
   logger.raw "\n"

@@ -2,6 +2,7 @@
   System calls
 ]#
 
+import common/serde
 import channels
 import cpu
 import gdt
@@ -29,6 +30,7 @@ type
 
 const
   UserAddrSpaceEnd* = 0x00007FFFFFFFFFFF'u64
+  MaxMessageBatchSize* = 1024
 
 let
   logger = DebugLogger(name: "syscall")
@@ -216,7 +218,7 @@ proc channelCreate*(args: ptr SyscallArgs): int =
   let chMode = ChannelMode(mode)
   let msgSize = args.arg2.int
   logger.info &"[tid:{currentTask.id}] channelCreate: mode={mode}, msgSize={msgSize}"
-  let ret = channels.create(currentTask, chMode, msgSize = msgSize)
+  let ret = channels.createUserChannel(currentTask, chMode, msgSize = msgSize)
   if ret < 0:
     return InvalidArg.int
   args.arg1 = ret.uint64
@@ -247,7 +249,7 @@ proc channelOpen*(args: ptr SyscallArgs): int =
 
   let currentTask = getCurrentTask()
   logger.info &"[tid:{currentTask.id}] channelOpen: chid={chid}, mode={mode}"
-  let ret = open(chid, currentTask, chMode)
+  let ret = openUserChannel(chid, currentTask, chMode)
   if ret < 0:
     return InvalidArg.int
 
@@ -324,10 +326,40 @@ proc channelSend*(args: ptr SyscallArgs): int =
   let data = cast[pointer](args.arg2)
   let len = args.arg3.int
 
-  logger.info &"[tid:{getCurrentTask().id}] channelSend: chid={chid}, len={len}, data={cast[uint64](data):#x}"
+  logger.info &"[tid:{getCurrentTask().id}] channelSend: chid={chid}, len={len}, data @ {cast[uint64](data):#x}"
   let ret = send(chid, len, data)
   if ret < 0:
     return InvalidArg.int
+
+###
+# ChannelSendBatch
+###
+proc channelSendBatch*(args: ptr SyscallArgs): int =
+  ##
+  ## Send data to a channel in a batch
+  ## Arguments:
+  ##   arg1 (in): channel id
+  ##   arg2 (in): pointer to a MessageBatch object
+  ##   arg3 (in): length of the MessageBatch object
+  ##
+  ## Returns:
+  ##   None
+  ##
+  ## Side effects:
+  ##   If the channel is full, the task will be blocked until there is space in the channel.
+  ##
+  let chid = args.arg1.int
+  let batch = cast[ptr MessageBatch](args.arg2)
+  let len = args.arg3.int
+  if batch.isNil or len > MaxMessageBatchSize:
+    return InvalidArg.int
+
+  # send each message in the batch
+  for i in 0 ..< batch.count:
+    let msg = batch.messages[i]
+    let ret = send(chid, msg.len, msg.data)
+    if ret < 0:
+      return InvalidArg.int
 
 ###
 # ChannelRecv
@@ -338,8 +370,8 @@ proc channelRecv*(args: ptr SyscallArgs): int =
   ##
   ## Arguments:
   ##   arg1 (in): channel id
-  ##   arg2 (in): buffer pointer
-  ##   arg3 (in): buffer length
+  ##   arg2 (out): buffer pointer
+  ##   arg3 (out): buffer length
   ##
   ## Returns:
   ##   0 on success
@@ -349,8 +381,8 @@ proc channelRecv*(args: ptr SyscallArgs): int =
   ##   If the channel is empty, the task will be blocked until there is data in the channel.
   ##
   let chid = args.arg1.int
-  let buf = cast[pointer](args.arg2)
-  let len = args.arg3.int
+  var buf = cast[pointer](args.arg2)
+  var len = args.arg3.int
   logger.info &"[tid:{getCurrentTask().id}] channelRecv: chid={chid}"
   let ret = recv(chid, buf, len)
   if ret < 0:
@@ -402,6 +434,7 @@ proc syscallInit*() =
   syscallTable[SysChannelOpen] = channelOpen
   syscallTable[SysChannelClose] = channelClose
   syscallTable[SysChannelSend] = channelSend
+  syscallTable[SysChannelSendBatch] = channelSendBatch
   syscallTable[SysChannelRecv] = channelRecv
   syscallTable[SysChannelAlloc] = channelAlloc
 

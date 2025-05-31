@@ -18,5 +18,17 @@ const
   SysChannelOpen* = 301
   SysChannelClose* = 302
   SysChannelSend* = 303
-  SysChannelRecv* = 304
-  SysChannelAlloc* = 305
+  SysChannelSendBatch* = 304
+  SysChannelRecv* = 305
+  SysChannelRecvBatch* = 306
+  SysChannelAlloc* = 307
+  SysChannelAllocBatch* = 308
+
+type
+  Message* = object
+    len*: int
+    data*: pointer
+
+  MessageBatch* {.packed.} = object
+    count*: int
+    messages*: UncheckedArray[Message]

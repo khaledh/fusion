@@ -24,7 +24,7 @@ const
   KernelStackVirtualBase = KernelStackVirtualEnd - KernelStackSize
 
   KernelImagePath = "\\efi\\fusion\\kernel.bin"
-  UserImagePath = "\\efi\\fusion\\utask.bin"
+  UserImagePath = "\\efi\\fusion\\shell.elf"
 
 let
   logger = DebugLogger(name: "boot")

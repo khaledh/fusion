@@ -19,9 +19,6 @@ boot_out := "bootx64.efi"
 kernel_nim := "src/kernel/start.nim"
 kernel_out := "kernel.bin"
 
-user_nim := "src/user/utask.nim"
-user_out := "utask.bin"
-
 ovmf_code := "ovmf/OVMF_CODE.fd"
 ovmf_vars := "ovmf/OVMF_VARS.fd"
 
@@ -34,7 +31,14 @@ kernel:
   nim c {{nimflags}} --out:build/kernel/{{kernel_out}} {{kernel_nim}}
 
 user:
-  nim c {{nimflags}} --out:build/user/{{user_out}} {{user_nim}}
+  #!/usr/bin/env bash
+  set -e
+  user_nim=("src/user/utask.nim" "src/user/shell.nim")
+  user_out=("utask.elf" "shell.elf")
+  for i in "${!user_nim[@]}"; do
+    nim c {{nimflags}} --out:build/user/${user_out[$i]} ${user_nim[$i]}
+    echo "Built ${user_nim[$i]} as ${user_out[$i]}"
+  done
 
 build: bootloader kernel user
 
@@ -43,7 +47,7 @@ run *QEMU_ARGS: bootloader kernel user
   mkdir -p {{disk_image_dir}}/efi/fusion
   cp build/boot/{{boot_out}} {{disk_image_dir}}/efi/boot/{{boot_out}}
   cp build/kernel/{{kernel_out}} {{disk_image_dir}}/efi/fusion/{{kernel_out}}
-  cp build/user/{{user_out}} {{disk_image_dir}}/efi/fusion/{{user_out}}
+  cp build/user/*.elf {{disk_image_dir}}/efi/fusion/
 
   @git restore ovmf/OVMF_VARS.fd
 
@@ -63,5 +67,4 @@ clean:
   git restore ovmf/OVMF_VARS.fd
   rm -rf build
   rm -rf {{disk_image_dir}}/efi/boot/{{boot_out}}
-  rm -rf {{disk_image_dir}}/efi/fusion/{{kernel_out}}
-  rm -rf {{disk_image_dir}}/efi/fusion/{{user_out}}
+  rm -rf {{disk_image_dir}}/efi/fusion

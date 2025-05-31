@@ -16,6 +16,17 @@ template orRaise*[T](opt: Option[T], exc: ref Exception): T =
   else:
     raise exc
 
+template orDefault*[T](opt: Option[T], default: T): T =
+  if opt.isSome:
+    opt.get
+  else:
+    default
+
+template orElse*[T](opt: Option[T], body: untyped): T =
+  if opt.isSome:
+    opt.get
+  else:
+    body
 
 # Virtual address, Physical address, pointers, etc.
 type
