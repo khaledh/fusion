@@ -154,6 +154,39 @@ proc channelRecv*(cid: int, buf: pointer, len: int): int =
     logger.info &"recv: error receiving data from channel {cid}: {result}"
     return -1
 
+proc channelRecvAny*(chids: openArray[int], buf: pointer, len: int): int =
+  ## Receive data from any channel. The buffer must be large enough to hold
+  ## the largest message across all the channels.
+  ## 
+  ## Arguments:
+  ##   chids (in): array of channel ids
+  ##   buf (in): buffer pointer
+  ##   len (in): buffer length
+  ##
+  ## Returns:
+  ##   0 on success
+  ##   -1 on error
+
+  let arrPtr = cast[uint64](chids[0].addr)
+  let arrLen = chids.len
+  let bufPtr {.codegenDecl: """register $# $# asm("r8")""".} = buf
+  let bufLen {.codegenDecl: """register $# $# asm("r9")""".} = len
+
+  asm """
+    syscall
+    : "=a" (`result`)          // rax (return value)
+    : "D" (`SysChannelRecvAny`), // rdi (syscall number)
+      "S" (`arrPtr`),            // rsi (pointer to array of channel ids)
+      "d" (`arrLen`),            // rdx (number of channel ids)
+      "r" (`bufPtr`),            // r8  (pointer to buffer to store data)
+      "r" (`bufLen`)             // r9  (length of buffer)
+    : "rcx", "r11", "memory"
+  """
+
+  if result < 0:
+    logger.info &"recvAny: error receiving data from channels {chids}: {result}"
+    return -1
+
 proc channelClose*(cid: int): int {.discardable.} =
   ## Close a channel
   ## 
@@ -264,6 +297,40 @@ proc recv*[T](ch: Channel[T]): Option[T] =
     return some($fs.str)
   else:
     return some(t)
+
+proc recvAny*[T1, T2](
+  ch1: Channel[T1],
+  ch2: Channel[T2],
+  handler1: proc (data: T1),
+  handler2: proc (data: T2),
+): int =
+  ## Receive data from any channel. The buffer must be large enough to hold
+  ## the largest message across all the channels.
+  ## 
+  ## Arguments:
+  ##   ch1 (in): first channel
+  ##   ch2 (in): second channel
+  ##   handler1 (in): handler for first channel
+  ##   handler2 (in): handler for second channel
+  ##
+  ## Returns:
+  ##   data on success
+
+  let maxSize = max(ch1.msgSize, ch2.msgSize)
+  var buf: alloc0(maxSize)
+  defer: dealloc(buf)
+
+  let chid = channelRecvAny([ch1.id, ch2.id], buf, maxSize)
+
+  if chid < 0:
+    return -1
+
+  if chid == ch1.id:
+    handler1(cast[ptr T1](buf)[])
+  else:
+    handler2(cast[ptr T2](buf)[])
+
+  return chid
 
 proc close*[T](ch: Channel[T]) =
   ## Close a channel

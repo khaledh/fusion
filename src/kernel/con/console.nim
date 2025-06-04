@@ -8,7 +8,6 @@ import framebuffer as fb
 import font
 import sched
 import drivers/kbd
-import taskmgr
 
 let
   logger = DebugLogger(name: "console")
@@ -102,6 +101,9 @@ proc write*(s: string, color: uint32 = ForegroundColor) =
   (curRow, curCol) = putString(curRow, curCol, s, color)
   showCursor()
 
+proc outEventHandler(fs: FString) =
+  write($fs.str)
+
 proc keyEventHandler(keyEvent: KeyEvent) =
   # logger.info &"received keyEvent: {keyEvent}"
   if keyEvent.eventType == KeyDown:
@@ -157,20 +159,7 @@ proc start*(chid: int) {.cdecl.} =
 
   showCursor()
 
+  let keyCh: MessageHandler[KeyEvent] = (id: con.kbdInChId, handler: keyEventHandler)
+  let outCh: MessageHandler[FString] = (id: con.outChId, handler: outEventHandler)
   while true:
-    var msgOpt = channels.recv[FString](con.outChId)
-    while msgOpt.isSome:
-      let msg = msgOpt.get
-      if msg.str[0] == '\xff':
-        break
-      write($msg.str)
-      msgOpt = channels.recv[FString](con.outChId)
-
-    var keyEventOpt = channels.recv[KeyEvent](con.kbdInChId)
-    while keyEventOpt.isSome:
-      keyEventHandler(keyEventOpt.get)
-      if keyEventOpt.get.ch == '\n':
-        break
-      keyEventOpt = channels.recv[KeyEvent](con.kbdInChId)
-
-    # sleep(100)
+    discard channels.recvAny(keyCh, outCh)

@@ -21,8 +21,9 @@ const
   SysChannelSendBatch* = 304
   SysChannelRecv* = 305
   SysChannelRecvBatch* = 306
-  SysChannelAlloc* = 307
-  SysChannelAllocBatch* = 308
+  SysChannelRecvAny* = 307
+  SysChannelAlloc* = 308
+  SysChannelAllocBatch* = 309
 
 type
   Message* = object

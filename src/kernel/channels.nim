@@ -1,47 +1,54 @@
-import std/tables
+import std/[sequtils, tables]
 
 import common/serde
+import condvars
 import locks
 import queues
 import task
 import vmdefs, vmmgr
 
-## TODO: Revise the description below (outdated).
+## Channels facilitate message passing between tasks.
 ##
-## Channels are used for message passing between tasks.
-##   - Each channel internally has a fixed power-of-two message size which is chosen based on the
-##     user-provided message size: 8, 16, 32, 64, 128, 256, 512, 1024
-##   - Each channel has a circular queue and a circular buffer.
-##   - The queue is used to store message metadata.
-##   - The buffer is used to store actual message data.
-##   - Each message has a pointer to the data in the buffer.
-##   - The buffer is allocated to variable-sized message data.
-##   - Tasks don't have direct access to the queue. They send/receive messages through system calls.
-##   - Buffers are shared between tasks communicating through the same channel.
-##   - Read/write access to the buffer is enforced through virtual memory page mappings.
-##   - The buffer is mapped into the task's address space when the channel is opened.
+## Core Concepts:
+##   - Message Size: Each channel operates with a fixed maximum message payload size (`S`),
+##     determined by rounding the user-specified size up to the nearest power-of-two
+##     (8, 16, 32, 64, 128, 256, 512, or 1024 bytes).
+##   - Internal Queue: Each channel (`Channel[S]`) maintains a `BlockingQueue` of `Message[S]` objects.
+##     The `Message[S]` type contains an inline data array (`array[S, byte]`) which holds the
+##     actual message payload or a descriptor (e.g., an `FString` for strings).
+##   - Channel Buffer (`ChannelBuffer`): A separate, VM-mappable memory region is associated with
+##     each channel. This buffer can be used by senders via the `alloc` procedure to obtain
+##     shared memory, for instance, to store string content before sending an `FString` descriptor.
 ##
-## User space API:
-##   - `create` to create and open a channel
-##   - `open` to open an existing channel
-##   - `alloc` to allocate space for a message in the buffer (by sender)
-##   - `send` to send a message (previously allocated) to a channel
-##   - `recv` to receive a message from a channel (returns a pointer to the message in the buffer)
-##   - `free` to free a message (by receiver)
-##   - `close` to close a channel
+## Data Handling:
+##   - Sending: When a message (e.g., an object of type `T`) is sent, its data (up to `S` bytes)
+##     is copied into the `Message[S].data` array of a new message object, which is then enqueued.
+##     For strings, the string content is typically placed into the `ChannelBuffer` (using `alloc`),
+##     and an `FString` descriptor (containing a pointer to this content and length) is what gets
+##     copied into the `Message[S].data` array.
+##   - Receiving: When a message is received, its payload is copied from the `Message[S].data`
+##     array (in the dequeued message) into the receiver's provided buffer.
 ##
-## queue
-## +-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
-## | msg1  | msg2  | msg3  |  ...  |  ...  |  ...  |  ...  |  ...  |  ...  |  ...  |
-## +-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
-##     |       |
-##     |       +-----------------------+
-##     +---------+                     |
-##               |                     |
-## buffer        v                     v
-## +-------------+---------------------+---------------------+---------------------+
-## |    ...      |  data1              |  data2              |    ...              |
-## +-------------+---------------------+---------------------+---------------------+
+## Memory Management and Sharing:
+##   - The `ChannelBuffer` is mapped into the address space of tasks that open the channel.
+##     Read/write access is managed by VM permissions.
+##   - Tasks interact with channels via system call wrappers.
+##
+## User Space API Summary:
+##   - `createKernelChannel`, `createUserChannel`: Create a new channel and open it.
+##     The channel's buffer is mapped into the creator's (or specified task's) address space.
+##   - `openUserChannel`, `openKernelChannel`: Open an existing channel by ID, mapping its
+##     `ChannelBuffer` into the task's address space.
+##   - `alloc`: (Sender) Allocate a segment of memory from the channel's shared `ChannelBuffer`.
+##     This is primarily used for preparing data (like large strings) that will be referenced by
+##     a descriptor sent as the message payload.
+##   - `send`: (Sender) Enqueue a message. The message data (or a descriptor) is copied into the
+##     channel's internal queue.
+##   - `recv`, `tryRecv`: (Receiver) Dequeue a message, copying its payload to a user-provided buffer.
+##     `tryRecv` is non-blocking.
+##   - `recvAny`: (Receiver) Wait for and receive a message from one of several specified channels.
+##   - `close`: Close a channel for a specific task, which typically involves unmapping the
+##     `ChannelBuffer` from that task's address space.
 
 type
   MessageBase = object of RootObj
@@ -66,6 +73,8 @@ type
   ChannelMode* = enum
     Read
     Write
+
+  MessageHandler*[T] = tuple[id: int, handler: proc (data: T)]
 
 const
   DefaultCap* = 1024
@@ -101,6 +110,9 @@ proc recv*(chid: int, buf: pointer, len: int): int
 proc recv*[T](chid: int): Option[T]
 proc tryRecv*(chid: int, buf: pointer, len: int): int
 proc tryRecv*[T](chid: int): Option[T]
+
+proc recvAny*(chids: openArray[int], buf: pointer, len: int): int
+proc recvAny*[T1, T2](h1: MessageHandler[T1], h2: MessageHandler[T2]): int
 
 proc close*(chid: int, task: Task): int
 
@@ -356,7 +368,10 @@ proc recvMessageAux[S: static int](
   let chan = cast[Channel[S]](ch)
   var msg: Message[S]
   if noWait:
-    msg = chan.queue.dequeueNoWait().orElse:
+    let msgOpt = chan.queue.dequeueNoWait()
+    if msgOpt.isSome:
+      msg = msgOpt.get()
+    else:
       return -1
   else:
     msg = chan.queue.dequeue()
@@ -405,3 +420,128 @@ proc tryRecv*[T](chid: int): Option[T] {.stackTrace:off.} =
   var t: T
   let ret = tryRecv(chid, t.addr, sizeof(T))
   result = if ret < 0: none(T) else: some(t)
+
+####################################################################################################
+# Receive from multiple channels
+####################################################################################################
+
+template addNotEmptyListenerAux[S: static int](ch: ChannelBase, listener: QueueListener) =
+  let chan = cast[Channel[S]](ch)
+  chan.queue.addNotEmptyListener(listener)
+
+template addNotEmptyListener(ch: ChannelBase, listener: QueueListener) =
+  case ch.msgSize:
+    of 8: addNotEmptyListenerAux[8](ch, listener)
+    of 16: addNotEmptyListenerAux[16](ch, listener)
+    of 32: addNotEmptyListenerAux[32](ch, listener)
+    of 64: addNotEmptyListenerAux[64](ch, listener)
+    of 128: addNotEmptyListenerAux[128](ch, listener)
+    of 256: addNotEmptyListenerAux[256](ch, listener)
+    of 512: addNotEmptyListenerAux[512](ch, listener)
+    of 1024: addNotEmptyListenerAux[1024](ch, listener)
+    else: raise newException(ValueError, "Message size too large (max 1024)")
+
+template removeNotEmptyListenerAux[S: static int](ch: ChannelBase, listener: QueueListener) =
+  let chan = cast[Channel[S]](ch)
+  chan.queue.removeNotEmptyListener(listener)
+
+template removeNotEmptyListener(ch: ChannelBase, listener: QueueListener) =
+  case ch.msgSize:
+    of 8: removeNotEmptyListenerAux[8](ch, listener)
+    of 16: removeNotEmptyListenerAux[16](ch, listener)
+    of 32: removeNotEmptyListenerAux[32](ch, listener)
+    of 64: removeNotEmptyListenerAux[64](ch, listener)
+    of 128: removeNotEmptyListenerAux[128](ch, listener)
+    of 256: removeNotEmptyListenerAux[256](ch, listener)
+    of 512: removeNotEmptyListenerAux[512](ch, listener)
+    of 1024: removeNotEmptyListenerAux[1024](ch, listener)
+    else: raise newException(ValueError, "Message size too large (max 1024)")
+
+proc recvAny*(chids: openArray[int], buf: pointer, len: int): int {.stackTrace:off.} =
+  ## Receive from multiple channels, returning the first channel that has a message.
+  ##
+  ## Arguments:
+  ##   - `chids`: array of channel IDs
+  ##   - `buf`: pointer to buffer to store the message
+  ##   - `len`: length of the buffer
+  ##
+  ## Returns:
+  ##   - channel id on success
+  ##   - -1 on error
+  ##
+  ## Side effects:
+  ##   - If no channel has a message, the task will be blocked until a message arrives.
+  ##
+  let nonExistent = chids.filter(chid => not channels.hasKey(chid))
+  if nonExistent.len > 0:
+    logger.info &"recvAny: channel ids {nonExistent} not found"
+    return -1
+
+  var chs = chids.map(chid => channels[chid])
+
+  # First, check if any of the channels has a message
+  for ch in chs:
+    result = recvMessage(ch, buf, len, noWait = true)
+    if result >= 0:
+      # message received from this channel
+      return ch.id
+
+  # none of the channels has a message; wait/listen for a message on any of the channels
+  var listener = newQueueListener()
+  try:
+    # add the listener to all channels
+    for ch in chs:
+      ch.addNotEmptyListener(listener)
+
+    result = -1
+    while result < 0:
+      # wait for a message to arrive on any of the channels
+      logger.info &"waiting for a message on channels {chids}..."
+      listener.cv.wait(listener.lock)
+
+      # find the channel that has a message
+      for ch in chs:
+        result = recvMessage(ch, buf, len, noWait = true)
+        if result >= 0:
+          # message received from this channel
+          logger.info &"message received from channel {ch.id}"
+          result = ch.id
+          break
+      
+      # message was grabbed by another task, try again
+
+  finally:
+    # remove the listener from all channels
+    for ch in chs:
+      ch.removeNotEmptyListener(listener)
+
+proc recvAny*[T1, T2](
+  h1: MessageHandler[T1],
+  h2: MessageHandler[T2],
+): int =
+  if not channels.hasKey(h1.id):
+    logger.info &"recvAny[T1, T2]: channel id {h1.id} not found"
+    return -1
+
+  if not channels.hasKey(h2.id):
+    logger.info &"recvAny[T1, T2]: channel id {h2.id} not found"
+    return -1
+
+  let ch1 = channels[h1.id]
+  let ch2 = channels[h2.id]
+
+  let maxSize = max(ch1.msgSize, ch2.msgSize)
+  let buf = alloc0(maxSize)
+  defer: dealloc(buf)
+
+  result = recvAny([h1.id, h2.id], buf, maxSize)
+
+  if result < 0:
+    return -1
+
+  if result == h1.id and h1.handler != nil:
+    h1.handler(cast[ptr T1](buf)[])
+  elif result == h2.id and h2.handler != nil:
+    h2.handler(cast[ptr T2](buf)[])
+  else:
+    raise newException(ValueError, "recvAny[T1, T2]: returned channel id is not in the list of channels!")

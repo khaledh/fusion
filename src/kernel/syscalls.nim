@@ -2,7 +2,6 @@
   System calls
 ]#
 
-import common/serde
 import channels
 import cpu
 import gdt
@@ -389,6 +388,41 @@ proc channelRecv*(args: ptr SyscallArgs): int =
     return InvalidArg.int
 
 ###
+# ChannelRecvAny
+###
+proc channelRecvAny*(args: ptr SyscallArgs): int =
+  ##
+  ## Receive data from any channel
+  ##
+  ## Arguments:
+  ##   arg1 (in): pointer to an array of channel ids
+  ##   arg2 (in): number of channel ids
+  ##   arg3 (out): buffer pointer
+  ##   arg4 (out): buffer length
+  ## 
+  ## Returns:
+  ##   channel id on success
+  ##   -1 on error
+  ##
+  ## Side effects:
+  ##   If no channel has a message, the task will be blocked until a message arrives.
+  ## 
+  let chids = cast[ptr UncheckedArray[int]](args.arg1)
+  let nchids = args.arg2.int
+  let buf = cast[pointer](args.arg3)
+  let len = args.arg4.int
+
+  # convert the unchecked array of channel ids to a sequence
+  var chidsSeq: seq[int] = @[]
+  for i in 0 ..< nchids:
+    chidsSeq.add(chids[i])
+
+  logger.info &"[tid:{getCurrentTask().id}] channelRecvAny: len={len}, nchids={nchids}, chids={chidsSeq}"
+  let ret = recvAny(chidsSeq, buf, len)
+  if ret < 0:
+    return InvalidArg.int
+
+###
 # Print
 ###
 proc print*(args: ptr SyscallArgs): int =
@@ -436,6 +470,7 @@ proc syscallInit*() =
   syscallTable[SysChannelSend] = channelSend
   syscallTable[SysChannelSendBatch] = channelSendBatch
   syscallTable[SysChannelRecv] = channelRecv
+  syscallTable[SysChannelRecvAny] = channelRecvAny
   syscallTable[SysChannelAlloc] = channelAlloc
 
   syscallTable[SysPrint] = print

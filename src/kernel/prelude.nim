@@ -22,12 +22,6 @@ template orDefault*[T](opt: Option[T], default: T): T =
   else:
     default
 
-template orElse*[T](opt: Option[T], body: untyped): T =
-  if opt.isSome:
-    opt.get
-  else:
-    body
-
 # Virtual address, Physical address, pointers, etc.
 type
   VAddr* = distinct uint64

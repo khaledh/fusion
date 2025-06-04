@@ -4,7 +4,7 @@
 import std/[options, strformat, strutils]
 
 import common/[debugcon]
-import syslib/[channels, os]
+import syslib/[channels]
 
 const
   ConsoleOutputChannelId = 1
@@ -35,7 +35,6 @@ proc main(): int {.exportc.} =
 
   while true:
     conOutCh.send("\n> ")
-    conOutCh.send("\xff")  # end of output (for now)
     let inputOpt = channels.recv[string](conInCh)
     if inputOpt.isSome:
       let input = inputOpt.get

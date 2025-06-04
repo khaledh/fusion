@@ -33,22 +33,24 @@ kernel:
 user:
   #!/usr/bin/env bash
   set -e
-  user_nim=("src/user/utask.nim" "src/user/shell.nim")
-  user_out=("utask.elf" "shell.elf")
+  user_nim=("src/user/shell.nim")
+  user_out=("shell.elf")
   for i in "${!user_nim[@]}"; do
-    nim c {{nimflags}} --out:build/user/${user_out[$i]} ${user_nim[$i]}
-    echo "Built ${user_nim[$i]} as ${user_out[$i]}"
+    cmd="nim c {{nimflags}} --out:build/user/${user_out[$i]} ${user_nim[$i]}"
+    echo $cmd
+    $cmd
   done
 
 build: bootloader kernel user
 
-run *QEMU_ARGS: bootloader kernel user
+diskimg: build
   mkdir -p {{disk_image_dir}}/efi/boot
   mkdir -p {{disk_image_dir}}/efi/fusion
   cp build/boot/{{boot_out}} {{disk_image_dir}}/efi/boot/{{boot_out}}
   cp build/kernel/{{kernel_out}} {{disk_image_dir}}/efi/fusion/{{kernel_out}}
   cp build/user/*.elf {{disk_image_dir}}/efi/fusion/
 
+run *QEMU_ARGS: diskimg
   @git restore ovmf/OVMF_VARS.fd
 
   @echo ""
